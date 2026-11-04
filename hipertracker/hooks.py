@@ -1,7 +1,7 @@
 app_name = "hipertracker"
 app_title = "HiperTracker"
 app_publisher = "Hipersign"
-app_description = "Live GPS tracking of staff and vehicles from Traccar, inside Hipersign ERP"
+app_description = "Live GPS tracking of staff and vehicles inside Hipersign ERP, straight from the HiperTracker phone app"
 app_email = "hipersignerp@gmail.com"
 app_license = "mit"
 app_logo_url = "/assets/hipertracker/images/hipertracker-logo.png"
@@ -24,6 +24,14 @@ after_migrate = "hipertracker.install.after_migrate"
 # The phone app and the map call these short names (first built as server scripts on Nexus)
 override_whitelisted_methods = {
 	"hipertracker_live": "hipertracker.api.live",
+	"hipertracker_history": "hipertracker.api.history",
+	"hipertracker_position": "hipertracker.api.position",
 	"hipertracker_mobile_config": "hipertracker.api.mobile_config",
 	"hipertracker_checkin": "hipertracker.api.checkin",
+}
+
+# Alert heads about checked-in phones that stopped reporting; trim old location history
+scheduler_events = {
+	"cron": {"*/5 * * * *": ["hipertracker.api.offline_watch"]},
+	"daily": ["hipertracker.api.cleanup"],
 }

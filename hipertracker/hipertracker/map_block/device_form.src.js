@@ -1,5 +1,6 @@
 // HiperTracker Device form: live map of where this phone / vehicle is now.
-var HT_METHOD = "hipertracker.api.live";
+var HT_METHOD = "hipertracker_live";
+var HT_HISTORY = "hipertracker_history";
 
 frappe.ui.form.on("HiperTracker Device", {
 	refresh(frm) {
@@ -27,7 +28,7 @@ function ht_form_render(frm, recenter) {
 	const wrap = field.$wrapper;
 	const ident = String(frm.doc.traccar_identifier || "").trim();
 	if (!ident) {
-		wrap.html('<div class="text-muted small">Enter the Identifier shown in the tracker app on the phone to see where it is.</div>');
+		wrap.html('<div class="text-muted small">Enter the Device ID shown in the HiperTracker app on the phone to see where it is.</div>');
 		return;
 	}
 	if (!wrap.find(".ht-fmap").length) {
@@ -46,28 +47,34 @@ function ht_form_render(frm, recenter) {
 		}
 		const d = (data.devices || []).find((x) => x.identifier === ident);
 		if (!d) {
-			info.html(
-				'<span class="text-muted">No phone with Identifier <b>' + H.esc(ident) +
-					"</b> is in Traccar yet. Add it in Traccar with this exact identifier.</span>"
-			);
+			info.html('<span class="text-muted">' + (frm.doc.active ? "Save this device to see it on the map." : "This device is not active.") + "</span>");
 			wrap.find(".ht-fmap").hide();
 			return;
 		}
-		const traccar = (data.settings || {}).traccar_url;
+		if (!frm.__ht_rdate) frm.__ht_rdate = frappe.datetime.get_today();
 		info.html(
 			H.badge(d.status) +
-				"<span><b>" + (d.speed || 0) + " km/h</b></span>" +
-				'<span title="' + H.esc(H.place(d)) + '">📍 ' + H.esc(H.place(d)) + "</span>" +
-				'<span class="text-muted">Updated ' + H.ago(d.age_minutes) + "</span>" +
-				(d.battery != null ? '<span class="text-muted">🔋 ' + Math.round(d.battery) + "%</span>" : "") +
-				(d.status === "gps_off" ? '<b style="color:' + H.COLORS.gps_off + '">GPS switched off on the phone</b>' : "") +
-				'<span style="margin-left:auto;display:flex;gap:8px">' +
+				(d.status === "unknown"
+					? '<span class="text-muted">No location received yet. Set up the phone with the QR codes below, or log in to ERP in the HiperTracker app.</span>'
+					: "<span><b>" + (d.speed || 0) + " km/h</b></span>" +
+					  '<span title="' + H.esc(H.place(d)) + '">📍 ' + H.esc(H.place(d)) + "</span>" +
+					  '<span class="text-muted">Updated ' + H.ago(d.age_minutes) + "</span>") +
+				(d.battery != null && d.status !== "unknown" ? '<span class="text-muted">🔋 ' + Math.round(d.battery) + "%</span>" : "") +
+				(d.status === "gps_off" ? '<b style="color:' + H.COLORS.gps_off + '">GPS switched off on the phone' +
+					(d.gps_off_since ? " since " + H.esc(frappe.datetime.str_to_user(d.gps_off_since)) : "") + "</b>" : "") +
+				'<span style="margin-left:auto;display:flex;gap:6px;align-items:center">' +
+				'<input type="date" class="form-control input-xs ht-rdate" style="height:24px;width:140px;padding:0 6px;font-size:12px" value="' + H.esc(frm.__ht_rdate) + '">' +
+				'<button class="btn btn-xs btn-default ht-rbtn">Route History</button>' +
 				(d.lat != null ? '<a class="btn btn-xs btn-default" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + d.lat + "," + d.lon + '">Directions</a>' : "") +
-				(traccar ? '<a class="btn btn-xs btn-default" target="_blank" rel="noopener" href="' + H.esc(traccar) + '/replay">Route History</a>' : "") +
 				'<a class="btn btn-xs btn-default" href="javascript:void(0)" onclick="frappe.set_route(\'hipertracker\')">All on map</a></span>'
 		);
+		info.find(".ht-rdate").on("change", function () { frm.__ht_rdate = this.value; });
+		info.find(".ht-rbtn").on("click", () => ht_form_route(frm, d));
+		if (frm.__ht_route_on) {
+			wrap.find(".ht-fmap").show();
+		}
 		if (d.lat == null) {
-			wrap.find(".ht-fmap").hide();
+			if (!frm.__ht_route_on) wrap.find(".ht-fmap").hide();
 			return;
 		}
 		wrap.find(".ht-fmap").show();
@@ -80,8 +87,40 @@ function ht_form_render(frm, recenter) {
 			const map = el.__htmap;
 			if (el.__htmarker) H.update(el.__htmarker, d);
 			else el.__htmarker = H.marker(d).addTo(map);
-			if (recenter) map.setView([d.lat, d.lon], 15);
+			if (recenter && !frm.__ht_route_on) map.setView([d.lat, d.lon], 15);
 			setTimeout(() => map.invalidateSize(), 200);
+		});
+	});
+}
+
+// Route History: one day's route from ERP, drawn on the form map.
+function ht_form_route(frm, d) {
+	const H = window.htmini;
+	const wrap = frm.fields_dict.live_map.$wrapper;
+	const date = frm.__ht_rdate || frappe.datetime.get_today();
+	frappe.call({ method: HT_HISTORY, args: { device: frm.doc.name, date: date } }).then((r) => {
+		const data = r.message || {};
+		wrap.find(".ht-fmap").show();
+		H.leaflet().then(() => {
+			const el = wrap.find(".ht-fmap")[0];
+			if (!el.__htmap) el.__htmap = H.makeMap(el);
+			if (el.__htroute) el.__htmap.removeLayer(el.__htroute);
+			el.__htroute = H.drawRoute(el.__htmap, data);
+			frm.__ht_route_on = true;
+			let sum = wrap.find(".ht-rsum");
+			if (!sum.length) {
+				sum = $('<div class="ht-rsum" style="margin-top:8px;font-size:13px;display:flex;gap:12px;align-items:center"></div>');
+				wrap.append(sum);
+			}
+			sum.html("<span>" + H.routeSummary(data) + '</span><a href="javascript:void(0)" class="ht-rclear">Hide route</a>');
+			sum.find(".ht-rclear").on("click", () => {
+				el.__htmap.removeLayer(el.__htroute);
+				el.__htroute = null;
+				frm.__ht_route_on = false;
+				sum.remove();
+				ht_form_render(frm, true);
+			});
+			setTimeout(() => el.__htmap.invalidateSize(), 200);
 		});
 	});
 }
@@ -97,6 +136,9 @@ frappe.ui.form.on("HiperTracker Device", {
 		ht_setup_render(frm);
 	},
 	traccar_identifier(frm) {
+		ht_setup_render(frm);
+	},
+	device_key(frm) {
 		ht_setup_render(frm);
 	},
 });
@@ -119,19 +161,25 @@ function ht_setup_render(frm) {
 	const H = window.htmini;
 	const ident = String(frm.doc.traccar_identifier || "").trim();
 	if (!ident) {
-		wrap.html('<div class="text-muted small">Enter or generate the Traccar Identifier first.</div>');
+		wrap.html('<div class="text-muted small">Enter or generate the Device ID first.</div>');
+		return;
+	}
+	if (frm.is_new() || !frm.doc.device_key) {
+		wrap.html('<div class="text-muted small">Save this device to get the phone setup QR codes.</div>');
 		return;
 	}
 	const S = "HiperTracker Settings";
 	frappe.db
-		.get_value(S, S, ["phone_report_url", "app_download_url", "phone_interval", "phone_distance"])
+		.get_value(S, S, ["app_download_url", "phone_interval", "phone_distance"])
 		.then((r) => {
 			const s = (r && r.message) || {};
-			const report = (s.phone_report_url || "http://gps.hipersignerp.cloud:5055").replace(/\/+$/, "");
+			// the phone sends its locations straight to this ERP, with this device's key
+			const report = window.location.origin + "/api/method/hipertracker_position";
 			const download = s.app_download_url ||
 				"https://github.com/hipersignerp-dev/Hipersign-traccar-client/releases/latest/download/HiperTracker.apk";
 			const params = new URLSearchParams({
 				id: ident,
+				key: frm.doc.device_key || "",
 				accuracy: "high",
 				interval: String(s.phone_interval || 60),
 				distance: String(s.phone_distance || 50),
@@ -153,8 +201,7 @@ function ht_setup_render(frm) {
 					card("1. Install the app", "Scan with the phone's camera, download <b>HiperTracker.apk</b> and install it.", "ht-qr-install", download) +
 					card("2. Set up this phone", "In HiperTracker on the phone: ⚙ Settings → QR icon → scan this. It links the phone to <b>" +
 						H.esc(frm.doc.employee_name || frm.doc.device_label || ident) + "</b> (ID " + H.esc(ident) + ").", "ht-qr-setup", setup) +
-				"</div>" +
-				(frm.is_new() ? '<div class="text-muted small" style="margin-top:8px">Save this device before scanning, so it is added to Traccar.</div>' : "")
+				"</div>"
 			);
 			return ht_qr_lib().then(() => {
 				new window.QRCode(wrap.find(".ht-qr-install")[0], { text: download, width: 170, height: 170, correctLevel: window.QRCode.CorrectLevel.M });

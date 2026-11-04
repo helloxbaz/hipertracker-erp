@@ -50,7 +50,7 @@ window.htmini = window.htmini || (function () {
 	function makeMap(el) {
 		const L = window.L;
 		const map = L.map(el).setView([10.55, 76.3], 8);
-		// Google road / hybrid tiles, the same layers Traccar's web app uses
+		// Google road / hybrid tiles, the same layers Traccar uses
 		const base = L.tileLayer("https://{s}.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}", {
 			subdomains: ["mt0", "mt1", "mt2", "mt3"], maxZoom: 20, attribution: "Map data &copy; Google" }).addTo(map);
 		const sat = L.tileLayer("https://{s}.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}", {
@@ -82,28 +82,59 @@ window.htmini = window.htmini || (function () {
 		else m.bindTooltip(html, { permanent: true, direction: "right", offset: [10, 0] });
 	}
 
-	return { COLORS, LABELS, esc, ago, place, badge, leaflet, makeMap, marker, update };
+	// One day's route from hipertracker_history: blue line, green start, red last point,
+	// check in / out rings and orange rings where GPS was switched off. Returns the layer group.
+	function drawRoute(map, data) {
+		const L = window.L;
+		const g = L.layerGroup().addTo(map);
+		const pts = (data.points || []).map((p) => [p[0], p[1]]);
+		const dot = (ll, color, tip, ring) =>
+			L.circleMarker(ll, ring
+				? { radius: 9, color: color, weight: 3, fillOpacity: 0 }
+				: { radius: 6, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1 }).bindTooltip(tip).addTo(g);
+		if (pts.length) {
+			L.polyline(pts, { color: "#2563eb", weight: 4, opacity: 0.85 }).addTo(g);
+			dot(pts[0], "#16a34a", "Start " + data.points[0][2]);
+			dot(pts[pts.length - 1], "#dc2626", "Last " + data.points[data.points.length - 1][2]);
+		}
+		const extra = [];
+		(data.checkins || []).forEach((c) => {
+			if (c.lat == null) return;
+			extra.push([c.lat, c.lon]);
+			dot([c.lat, c.lon], c.log_type === "IN" ? "#16a34a" : "#6b7280", (c.log_type === "IN" ? "Checked in " : "Checked out ") + String(c.time).slice(11, 16), true);
+		});
+		(data.events || []).forEach((e) => {
+			if (e.lat == null || e.event === "GPS On") return;
+			dot([e.lat, e.lon], COLORS.gps_off, e.event + " " + String(e.time).slice(11, 16), true);
+		});
+		const all = pts.concat(extra);
+		if (all.length > 1) map.fitBounds(all, { padding: [40, 40], maxZoom: 16 });
+		else if (all.length) map.setView(all[0], 15);
+		return g;
+	}
+
+	function routeSummary(data) {
+		const n = (data.points || []).length;
+		if (!n) return "No route recorded on " + esc(frappe.datetime.str_to_user(data.date)) + ".";
+		const off = (data.events || []).filter((e) => e.event === "GPS Off").length;
+		return "<b>" + esc(frappe.datetime.str_to_user(data.date)) + "</b>: " + data.distance_km + " km, " + n + " points, " +
+			data.points[0][2] + " – " + data.points[n - 1][2] +
+			(off ? ' · <b style="color:' + COLORS.gps_off + '">GPS switched off ' + off + " time(s)</b>" : "");
+	}
+
+	return { COLORS, LABELS, esc, ago, place, badge, leaflet, makeMap, marker, update, drawRoute, routeSummary };
 })();
 
 // HiperTracker Device list: live map of all devices above the list.
-var HT_LIST_METHOD = "hipertracker.api.live";
+var HT_LIST_METHOD = "hipertracker_live";
 
 frappe.listview_settings["HiperTracker Device"] = {
 	add_fields: ["last_status", "traccar_identifier", "employee_name"],
 	get_indicator(doc) {
-		const map = { Online: "green", Offline: "red", "GPS Off": "orange", "Off Duty": "gray", "Not in Traccar": "gray" };
+		const map = { Online: "green", Offline: "red", "GPS Off": "orange", "Off Duty": "gray", "No Data": "gray", "Not in Traccar": "gray" };
 		if (doc.last_status) return [__(doc.last_status), map[doc.last_status] || "gray", "last_status,=," + doc.last_status];
 	},
 	onload(listview) {
-		listview.page.add_inner_button(__("Sync from Traccar"), () => {
-			frappe.show_alert({ message: __("Syncing devices from Traccar…"), indicator: "blue" });
-			ht_list_render(listview, 1).then((data) => {
-				if (data && !data.error) {
-					frappe.show_alert({ message: __("{0} new device(s) added", [data.created || 0]), indicator: "green" });
-				}
-				listview.refresh();
-			});
-		});
 		listview.page.add_inner_button(__("Full Map"), () => frappe.set_route("hipertracker"));
 		ht_list_render(listview, 0);
 		if (window.__ht_list_timer) clearInterval(window.__ht_list_timer);
@@ -153,8 +184,9 @@ function ht_list_render(listview, sync) {
 				H.badge("online") + " " + c.online + H.badge("offline") + " " + c.offline + H.badge("gps_off") + " " + c.gps_off + (c.off_duty ? H.badge("off_duty") + " " + c.off_duty : "") +
 				(gps.length ? '<span style="color:' + H.COLORS.gps_off + '"><b>GPS off:</b> ' +
 					gps.map((d) => H.esc(d.label) + (d.employee_name ? " (" + H.esc(d.employee_name) + ")" : "")).join(", ") + "</span>" : "") +
-				(data.unmapped_count ? '<span class="text-muted">' + data.unmapped_count + " not linked to a person — click their marker to link</span>" : "") +
-				(!ds.length ? '<span class="text-muted">No phones yet. Add them in Traccar, then click <b>Sync from Traccar</b>.</span>' : "")
+				((data.not_in_traccar || []).length ? '<span class="text-muted">Waiting for the first location: ' +
+					data.not_in_traccar.map((x) => H.esc(x.label)).join(", ") + "</span>" : "") +
+				(!ds.length ? '<span class="text-muted">No phones yet. Click <b>+ Add HiperTracker Device</b>, then scan its setup QR with the phone.</span>' : "")
 		);
 		box.find(".ht-lcanvas").show();
 		return H.leaflet().then(() => {
@@ -169,14 +201,11 @@ function ht_list_render(listview, sync) {
 			const keep = {};
 			ds.forEach((d) => {
 				if (d.lat == null) return;
-				const key = String(d.traccar_id);
+				const key = String(d.identifier);
 				keep[key] = 1;
 				if (el.__htmarkers[key]) H.update(el.__htmarkers[key], d);
 				else {
-					el.__htmarkers[key] = H.marker(d, (x) => {
-						if (x.record) frappe.set_route("Form", "HiperTracker Device", x.record);
-						else frappe.new_doc("HiperTracker Device", { traccar_identifier: x.identifier, device_label: x.traccar_name || x.label });
-					}).addTo(map);
+					el.__htmarkers[key] = H.marker(d, (x) => frappe.set_route("Form", "HiperTracker Device", x.record)).addTo(map);
 				}
 			});
 			Object.keys(el.__htmarkers).forEach((k) => {

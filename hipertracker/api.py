@@ -1,43 +1,41 @@
 # Copyright (c) 2026, Hipersign and contributors
 # For license information, please see license.txt
-"""Live data for the HiperTracker map.
+"""HiperTracker: phones send their locations straight to this ERP (no Traccar server).
 
-Reads devices and their latest positions from Traccar and joins them to
-HiperTracker Device records on the Traccar Identifier, so the map knows which
-phone or vehicle belongs to which person.
+- position(): the phone app posts each location / GPS on-off event here (same simple form POST
+  Traccar's OsmAnd port accepts), with its device key in the URL. Stored as HiperTracker Position and
+  kept as the latest state on the HiperTracker Device.
+- live(): latest state of every device, for the maps.
+- history(): one day's route of a device.
+- Heads are alerted (ERP notification + email) when GPS is switched off and stays off, and when a
+  checked-in phone stops reporting.
 """
 
 import frappe
-import requests
 from frappe.utils import (
+	add_days,
+	add_to_date,
 	cint,
 	convert_utc_to_system_timezone,
 	flt,
+	format_datetime,
 	get_datetime,
+	get_url,
+	get_url_to_form,
+	getdate,
 	now_datetime,
 	time_diff_in_seconds,
+	today,
 )
 
-STATUS_LABELS = {"online": "Online", "offline": "Offline", "gps_off": "GPS Off", "off_duty": "Off Duty", "unknown": "Offline"}
+STATUS_LABELS = {"online": "Online", "offline": "Offline", "gps_off": "GPS Off", "off_duty": "Off Duty", "unknown": "No Data"}
 STATUS_RANK = {"gps_off": 0, "online": 1, "offline": 2, "off_duty": 3, "unknown": 4}
 DEVICE_FIELDS = [
-	"name",
-	"traccar_identifier",
-	"device_label",
-	"tracks",
-	"active",
-	"employee",
-	"employee_name",
-	"department",
-	"vehicle",
-	"reporting_head",
-	"head_name",
-	"phone",
-	"last_update",
-	"on_duty",
-	"duty_since",
+	"name", "traccar_identifier", "device_label", "tracks", "active", "employee", "employee_name", "department",
+	"vehicle", "head_name", "phone", "on_duty", "duty_since", "last_update", "last_latitude", "last_longitude",
+	"last_speed", "last_course", "last_accuracy", "last_battery", "last_address", "location_enabled",
+	"gps_off_since", "last_status",
 ]
-TIMEOUT = 15
 
 
 def _is_manager():
@@ -52,295 +50,315 @@ def _settings():
 		"zoom": cint(s.map_zoom) or 8,
 		"refresh": max(cint(s.refresh_seconds) or 30, 10),
 		"stale_minutes": max(cint(s.stale_minutes) or 15, 1),
-		"traccar_url": (s.traccar_url or "").strip().rstrip("/"),
+		"traccar_url": "",
 		"duty_mode": cint(s.duty_mode) if s.duty_mode is not None else 1,
+		"source": "erp",
 	}
 
 
-def _session(s):
-	"""A requests session signed in to Traccar, or None if not configured."""
-	sess = requests.Session()
-	sess.headers["Accept"] = "application/json"
-	if (s.auth_method or "API Token") == "Email and Password":
-		password = s.get_password("traccar_password", raise_exception=False)
-		if not s.traccar_email or not password:
-			return None
-		sess.auth = (s.traccar_email, password)
-	else:
-		token = s.get_password("api_token", raise_exception=False)
-		if not token:
-			return None
-		sess.headers["Authorization"] = "Bearer " + token
-	return sess
-
-
-def _get(sess, url):
-	r = sess.get(url, timeout=TIMEOUT)
-	r.raise_for_status()
-	return r.json()
-
-
-def _to_system_time(iso):
-	"""Traccar sends UTC like 2026-10-30T10:12:00.000+00:00."""
-	if not iso:
-		return None
-	return convert_utc_to_system_timezone(get_datetime(str(iso)[:19].replace("T", " "))).replace(tzinfo=None)
+# ---------------------------------------------------------------------------------------------
+# Map data
+# ---------------------------------------------------------------------------------------------
 
 
 @frappe.whitelist()
 def live(sync=0):
-	"""Devices with their latest position. sync=1 (managers) also adds new Traccar devices to ERP."""
+	"""Active devices with their latest location (only devices the user can read)."""
 	frappe.has_permission("HiperTracker Device", "read", throw=True)
 	is_manager = _is_manager()
-	do_sync = cint(sync) and is_manager
-	s, settings = _settings()
-	result = {
-		"settings": settings,
-		"is_manager": 1 if is_manager else 0,
-		"devices": [],
-		"not_in_traccar": [],
-		"unmapped_count": 0,
-		"created": 0,
-		"error": None,
-	}
-
-	links = frappe.get_list("HiperTracker Device", fields=DEVICE_FIELDS, limit_page_length=0)
-	by_ident = {(l.traccar_identifier or "").strip(): l for l in links}
-
-	base = settings["traccar_url"]
-	sess = _session(s) if base else None
-	if not sess:
-		result["error"] = (
-			"Traccar is not connected yet. Open HiperTracker Settings and add the server URL and API token."
-		)
-		return result
-
-	try:
-		try:
-			tdevices = _get(sess, base + "/api/devices?all=true")
-		except requests.HTTPError:
-			tdevices = _get(sess, base + "/api/devices")
-		positions = _get(sess, base + "/api/positions") or []
-	except Exception as e:
-		frappe.log_error(title="HiperTracker: Traccar request failed", message=frappe.get_traceback())
-		status = getattr(getattr(e, "response", None), "status_code", None)
-		if status in (401, 403):
-			result["error"] = "Traccar refused the sign-in. Check the API token in HiperTracker Settings."
-		else:
-			result["error"] = "Could not reach Traccar at " + base + ". Check the URL in HiperTracker Settings."
-		return result
-
-	pos_by_id = {p.get("id"): p for p in positions}
-	missing = [d.get("positionId") for d in tdevices if d.get("positionId") and d.get("positionId") not in pos_by_id]
-	for i in range(0, len(missing), 50):
-		try:
-			chunk = "&".join("id=" + str(pid) for pid in missing[i : i + 50])
-			for p in _get(sess, base + "/api/positions?" + chunk) or []:
-				pos_by_id[p.get("id")] = p
-		except Exception:
-			pass
-
-	show_unassigned = cint(s.show_unassigned) if s.show_unassigned is not None else 1
+	_, settings = _settings()
+	links = frappe.get_list("HiperTracker Device", fields=DEVICE_FIELDS, filters={"active": 1}, limit_page_length=0)
 	now = now_datetime()
-	seen = set()
-	out = []
-
-	for d in tdevices:
-		ident = (d.get("uniqueId") or "").strip()
-		link = by_ident.get(ident)
-
-		if link is None and do_sync and ident:
-			link = _create_device(d, ident)
-			if link:
-				result["created"] += 1
-
-		if link is not None:
-			seen.add(ident)
-			if not link.get("active"):
-				continue
-		else:
-			result["unmapped_count"] += 1
-			if not (is_manager and show_unassigned):
-				continue
-
-		p = pos_by_id.get(d.get("positionId")) or {}
-		attrs = p.get("attributes") or {}
-		loc_flag = attrs.get("locationEnabled")
-		gps_off = loc_flag is False or str(loc_flag).lower() == "false"
-		last_dt = _to_system_time(d.get("lastUpdate") or p.get("serverTime") or p.get("fixTime"))
+	out, no_data = [], []
+	for l in links:
+		last_dt = get_datetime(l.last_update) if l.last_update else None
 		age_min = time_diff_in_seconds(now, last_dt) / 60.0 if last_dt else None
-
-		status = "online" if d.get("status") == "online" else "offline"
-		if age_min is not None and age_min > settings["stale_minutes"]:
-			status = "offline"
+		gps_off = l.location_enabled is not None and not cint(l.location_enabled)
 		if last_dt is None:
 			status = "unknown"
-		if gps_off:
+		elif gps_off:
 			status = "gps_off"
-		if d.get("disabled"):
+		elif age_min > settings["stale_minutes"]:
 			status = "offline"
+		else:
+			status = "online"
 		# employees who haven't checked in (or have checked out) aren't expected to be tracked
-		if link is not None and settings["duty_mode"] and link.get("employee") and not link.get("on_duty"):
+		if settings["duty_mode"] and l.employee and not l.on_duty:
 			status = "off_duty"
-		speed = round(flt(p.get("speed")) * 1.852, 1)  # Traccar speed is in knots
+		if last_dt is None and status != "off_duty":
+			no_data.append({"record": l.name, "label": l.device_label, "identifier": l.traccar_identifier,
+							"employee_name": l.employee_name})
+		has_pos = l.last_latitude is not None and l.last_longitude is not None and not (
+			flt(l.last_latitude) == 0 and flt(l.last_longitude) == 0)
+		out.append({
+			"traccar_id": None, "identifier": l.traccar_identifier, "traccar_name": None,
+			"label": l.device_label or l.employee_name or l.traccar_identifier, "record": l.name, "mapped": 1,
+			"tracks": l.tracks or "Person", "employee": l.employee, "employee_name": l.employee_name,
+			"department": l.department, "vehicle": l.vehicle, "head_name": l.head_name, "phone": l.phone,
+			"status": status, "last_update": str(last_dt) if last_dt else None,
+			"age_minutes": round(age_min, 1) if age_min is not None else None,
+			"lat": flt(l.last_latitude) if has_pos else None, "lon": flt(l.last_longitude) if has_pos else None,
+			"speed": flt(l.last_speed) if status == "online" else 0, "course": l.last_course,
+			"address": l.last_address, "battery": l.last_battery, "accuracy": l.last_accuracy,
+			"location_enabled": 0 if gps_off else 1,
+			"gps_off_since": str(l.gps_off_since) if l.gps_off_since else None,
+			"on_duty": 1 if l.on_duty else 0, "duty_since": str(l.duty_since) if l.duty_since else None,
+		})
+		# keep the list view's Status column right as phones go quiet
+		if is_manager and STATUS_LABELS[status] != l.last_status:
+			frappe.db.set_value("HiperTracker Device", l.name, "last_status", STATUS_LABELS[status], update_modified=False)
+	return {
+		"settings": settings, "is_manager": 1 if is_manager else 0,
+		"devices": sorted(out, key=lambda r: (STATUS_RANK.get(r["status"], 4), (r["label"] or "").lower())),
+		"not_in_traccar": no_data, "unmapped_count": 0, "created": 0, "error": None,
+	}
 
-		lk = link or {}
-		out.append(
-			{
-				"traccar_id": d.get("id"),
-				"identifier": ident,
-				"traccar_name": d.get("name"),
-				"label": lk.get("device_label") or d.get("name") or ident,
-				"record": lk.get("name"),
-				"mapped": 1 if link is not None else 0,
-				"tracks": lk.get("tracks") or "Person",
-				"employee": lk.get("employee"),
-				"employee_name": lk.get("employee_name"),
-				"department": lk.get("department"),
-				"vehicle": lk.get("vehicle"),
-				"head_name": lk.get("head_name"),
-				"phone": lk.get("phone") or d.get("phone"),
-				"status": status,
-				"traccar_status": d.get("status"),
-				"last_update": str(last_dt) if last_dt else None,
-				"age_minutes": round(age_min, 1) if age_min is not None else None,
-				"lat": p.get("latitude"),
-				"lon": p.get("longitude"),
-				"speed": speed,
-				"course": p.get("course"),
-				"address": p.get("address"),
-				"battery": attrs.get("batteryLevel"),
-				"charging": attrs.get("charge"),
-				"motion": attrs.get("motion"),
-				"ignition": attrs.get("ignition"),
-				"alarm": attrs.get("alarm"),
-				"odometer": attrs.get("totalDistance"),
-				"location_enabled": 0 if gps_off else 1,
-				"accuracy": p.get("accuracy"),
-				"on_duty": 1 if lk.get("on_duty") else 0,
-				"duty_since": str(lk.get("duty_since")) if lk.get("duty_since") else None,
-			}
-		)
 
-		# keep the cached status on the ERP record fresh (at most every 5 min, or on sync)
-		if link is not None and is_manager:
-			stored = lk.get("last_update")
-			stale_cache = stored is None or (
-				last_dt is not None and time_diff_in_seconds(last_dt, get_datetime(stored)) > 300
+@frappe.whitelist()
+def history(device, date=None):
+	"""The route a phone reported on one day, plus the employee's check ins / outs."""
+	if not frappe.get_list("HiperTracker Device", filters={"name": device}, pluck="name"):
+		frappe.throw("You do not have access to this device.", frappe.PermissionError)
+	day = getdate(date or today())
+	start, end = get_datetime(f"{day} 00:00:00"), get_datetime(f"{day} 23:59:59")
+	rows = frappe.get_all(
+		"HiperTracker Position",
+		filters=[["device", "=", device], ["device_time", ">=", start], ["device_time", "<=", end]],
+		fields=["device_time", "latitude", "longitude", "speed", "event", "accuracy"],
+		order_by="device_time asc",
+		limit_page_length=20000,
+	)
+	points, events, dist, prev = [], [], 0.0, None
+	for r in rows:
+		if r.event != "Location":
+			events.append({"time": str(r.device_time), "event": r.event, "lat": r.latitude, "lon": r.longitude})
+			continue
+		if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > 200):
+			continue  # very rough fixes make zig-zags
+		p = [round(flt(r.latitude), 6), round(flt(r.longitude), 6), str(r.device_time)[11:16], flt(r.speed)]
+		if prev:
+			dist += _km(prev[0], prev[1], p[0], p[1])
+		points.append(p)
+		prev = p
+	checkins = []
+	emp = frappe.db.get_value("HiperTracker Device", device, "employee")
+	if emp:
+		checkins = [
+			{"log_type": c.log_type, "time": str(c.time), "lat": c.latitude, "lon": c.longitude}
+			for c in frappe.get_all(
+				"Employee Checkin",
+				filters=[["employee", "=", emp], ["time", ">=", start], ["time", "<=", end]],
+				fields=["log_type", "time", "latitude", "longitude"],
+				order_by="time asc",
 			)
-			if do_sync or stale_cache:
-				frappe.db.set_value(
-					"HiperTracker Device",
-					lk.get("name"),
-					{
-						"traccar_device_id": d.get("id"),
-						"traccar_name": d.get("name"),
-						"last_status": STATUS_LABELS.get(status, "Offline"),
-						"last_update": last_dt,
-						"last_latitude": p.get("latitude"),
-						"last_longitude": p.get("longitude"),
-						"last_speed": speed,
-						"last_address": p.get("address"),
-					},
-					update_modified=False,
-				)
-
-	for l in links:
-		ident = (l.traccar_identifier or "").strip()
-		if l.active and ident not in seen:
-			result["not_in_traccar"].append(
-				{"record": l.name, "label": l.device_label, "identifier": ident, "employee_name": l.employee_name}
-			)
-			if do_sync:
-				frappe.db.set_value(
-					"HiperTracker Device", l.name, "last_status", "Not in Traccar", update_modified=False
-				)
-
-	result["devices"] = sorted(out, key=lambda r: (STATUS_RANK.get(r["status"], 4), (r["label"] or "").lower()))
-	return result
+		]
+	return {"date": str(day), "points": points, "events": events, "checkins": checkins, "distance_km": round(dist, 1)}
 
 
-def _create_device(d, ident):
+def _km(lat1, lon1, lat2, lon2):
+	from math import asin, cos, radians, sin, sqrt
+
+	dlat, dlon = radians(lat2 - lat1), radians(lon2 - lon1)
+	a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+	return 6371 * 2 * asin(sqrt(a))
+
+
+# ---------------------------------------------------------------------------------------------
+# Locations from the phone app
+# ---------------------------------------------------------------------------------------------
+
+
+def _num(v):
+	if v in (None, ""):
+		return None
 	try:
-		doc = frappe.get_doc(
-			{
-				"doctype": "HiperTracker Device",
-				"traccar_identifier": ident,
-				"device_label": d.get("name") or ident,
-				"active": 1,
-				"traccar_device_id": d.get("id"),
-				"traccar_name": d.get("name"),
-				"phone": d.get("phone"),
-			}
-		).insert()
-		return frappe._dict(
-			name=doc.name,
-			traccar_identifier=ident,
-			device_label=doc.device_label,
-			tracks="Person",
-			active=1,
-			last_update=None,
-		)
-	except Exception:
-		frappe.log_error(title="HiperTracker: could not add device " + ident, message=frappe.get_traceback())
+		return float(v)
+	except (TypeError, ValueError):
 		return None
 
 
-def push_device(doc):
-	"""Make sure Traccar has a device with this record's identifier, named like the record.
+def _flag(v):
+	if v in (None, ""):
+		return None
+	return 0 if str(v).lower() in ("false", "0", "no", "off") else 1
 
-	Called after a HiperTracker Device is saved, so a phone set up with the record's QR code
-	appears in Traccar (and on the map) straight away.
+
+@frappe.whitelist(allow_guest=True)
+def position(**a):
+	"""A location or GPS on/off event from the HiperTracker app.
+
+	Form fields as sent by the app: id, lat, lon, timestamp (unix seconds), speed (knots), bearing,
+	altitude, accuracy, batt, charge, alarm, locationEnabled; the device key comes in the URL (?key=).
+	Always answers 200, so a phone never gets stuck retrying a point that was rejected.
 	"""
+	ident = str(a.get("id") or a.get("deviceid") or "").strip()
+	dev = frappe.db.get_value(
+		"HiperTracker Device", ident,
+		["name", "device_label", "employee", "employee_name", "active", "on_duty", "device_key", "reporting_head",
+		 "last_update", "location_enabled", "gps_off_since", "last_alert_at", "last_alert_type"],
+		as_dict=True,
+	) if ident else None
+	if not dev:
+		return {"ok": 0, "msg": "unknown device"}
+	if (dev.device_key or "") and str(a.get("key") or "").strip() != dev.device_key:
+		return {"ok": 0, "msg": "wrong device key"}
+	if not dev.active:
+		return {"ok": 0, "msg": "device not active"}
+	if not (a.get("lat") or a.get("locationEnabled") or a.get("alarm")):
+		return {"ok": 1, "msg": "nothing to record"}  # e.g. the app registering its push token
+
 	s = frappe.get_cached_doc("HiperTracker Settings")
-	ident = (doc.traccar_identifier or "").strip()
-	if not cint(s.auto_create_in_traccar) or not ident:
-		return
-	base = (s.traccar_url or "").strip().rstrip("/")
-	sess = _session(s) if base else None
-	if not sess:
-		return
-	label = doc.device_label or ident
-	category = "truck" if doc.tracks == "Vehicle" else "person"
-	try:
-		r = sess.get(base + "/api/devices", params={"uniqueId": ident}, timeout=TIMEOUT)
-		r.raise_for_status()
-		found = r.json() or []
-		if not found:
-			body = {"name": label, "uniqueId": ident, "category": category}
-			if doc.phone:
-				body["phone"] = doc.phone
-			if doc.employee_name:
-				body["contact"] = doc.employee_name
-			r = sess.post(base + "/api/devices", json=body, timeout=TIMEOUT)
-			r.raise_for_status()
-			dev = r.json() or {}
-			frappe.msgprint(f"Added to Traccar as {label}.", indicator="green", alert=True)
+	now = now_datetime()
+	when = now
+	ts = _num(a.get("timestamp"))
+	if ts:
+		try:
+			if ts > 100000000000:
+				ts = ts / 1000.0
+			utc = add_to_date(get_datetime("1970-01-01 00:00:00"), seconds=int(ts))
+			when = convert_utc_to_system_timezone(utc).replace(tzinfo=None)
+		except Exception:
+			when = now
+		if time_diff_in_seconds(when, now) > 300:
+			when = now
+
+	lat, lon = _num(a.get("lat")), _num(a.get("lon"))
+	if lat is not None and lon is not None and (abs(lat) > 90 or abs(lon) > 180 or (lat == 0 and lon == 0)):
+		lat = lon = None
+	loc_flag = _flag(a.get("locationEnabled"))
+	gps_on = 1 if loc_flag is None else loc_flag  # a normal fix means location is on
+	alarm = str(a.get("alarm") or "")
+	speed = _num(a.get("speed"))
+	if speed is not None:
+		speed = round(speed * 1.852, 1)  # knots -> km/h
+	batt = _num(a.get("batt"))
+	if batt is not None and batt <= 1:
+		batt *= 100
+	event = "Location"
+	if alarm == "gpsAntennaCut":
+		event = "GPS Off Alarm"
+	elif loc_flag == 0:
+		event = "GPS Off"
+	elif loc_flag == 1 and a.get("locationState"):
+		event = "GPS On"
+
+	frappe.get_doc({
+		"doctype": "HiperTracker Position", "device": dev.name, "device_label": dev.device_label,
+		"employee": dev.employee, "device_time": when, "event": event, "on_duty": 1 if dev.on_duty else 0,
+		"latitude": lat, "longitude": lon, "accuracy": _num(a.get("accuracy")), "speed": speed,
+		"course": _num(a.get("bearing")), "altitude": _num(a.get("altitude")), "battery": batt,
+		"charging": _flag(a.get("charge")) or 0, "location_enabled": gps_on,
+	}).insert(ignore_permissions=True)
+
+	# the live state only moves forward (buffered old points just go into the history)
+	newest = not dev.last_update or get_datetime(when) >= get_datetime(dev.last_update)
+	if newest:
+		upd = {"last_update": when, "location_enabled": gps_on}
+		if lat is not None:
+			upd.update(last_latitude=lat, last_longitude=lon, last_accuracy=_num(a.get("accuracy")) or 0,
+					   last_speed=speed or 0, last_course=_num(a.get("bearing")) or 0)
+		if batt is not None:
+			upd["last_battery"] = batt
+		if gps_on:
+			upd.update(gps_off_since=None, last_status="Online")
 		else:
-			dev = found[0]
-			wanted = {"name": label, "category": category}
-			if doc.employee_name:
-				wanted["contact"] = doc.employee_name
-			if doc.phone:
-				wanted["phone"] = doc.phone
-			if any(dev.get(k) != v for k, v in wanted.items()):
-				dev.update(wanted)
-				sess.put(base + f"/api/devices/{dev.get('id')}", json=dev, timeout=TIMEOUT).raise_for_status()
-				frappe.msgprint("Updated in Traccar.", indicator="green", alert=True)
-		if dev.get("id") and dev.get("id") != doc.traccar_device_id:
-			frappe.db.set_value(
-				"HiperTracker Device",
-				doc.name,
-				{"traccar_device_id": dev.get("id"), "traccar_name": label},
-				update_modified=False,
-			)
+			upd.update(gps_off_since=dev.gps_off_since or when, last_status="GPS Off")
+		if cint(s.duty_mode) and dev.employee and not dev.on_duty:
+			upd["last_status"] = "Off Duty"
+		if dev.last_alert_type == "offline":
+			upd["last_alert_type"] = ""  # a fresh location ends an "offline" alert
+		frappe.db.set_value("HiperTracker Device", dev.name, upd, update_modified=False)
+
+	who = dev.employee_name or dev.device_label or dev.name
+	if event == "GPS Off Alarm" and newest:
+		where = (f'<p>Last known location: <a href="https://www.google.com/maps?q={lat},{lon}">'
+				 f"{round(lat, 5)}, {round(lon, 5)}</a></p>") if lat is not None else ""
+		_alert(dev, s, "gps_off", f"GPS switched off: {who}",
+			   f"<p><b>{who}</b> has switched off location (GPS) on their phone and has not turned it back on"
+			   f" after the reminders on the phone.</p><p>Since: {format_datetime(dev.gps_off_since or when)}</p>{where}"
+			   f'<p><a href="{get_url_to_form("HiperTracker Device", dev.name)}">Open in HiperTracker</a></p>')
+	elif gps_on and newest and dev.last_alert_type == "gps_off" and not dev.location_enabled:
+		for u in _head_users(dev):
+			_bell(u, dev.name, f"GPS back on: {who}")
+		frappe.db.set_value("HiperTracker Device", dev.name, "last_alert_type", "", update_modified=False)
+	return {"ok": 1, "msg": None}
+
+
+def _head_users(dev):
+	if dev.reporting_head:
+		return [dev.reporting_head]
+	if dev.employee:
+		boss = frappe.db.get_value("Employee", dev.employee, "reports_to")
+		user = frappe.db.get_value("Employee", boss, "user_id") if boss else None
+		if user:
+			return [user]
+	return []
+
+
+def _bell(user, device, subject, body=None):
+	try:
+		frappe.get_doc({"doctype": "Notification Log", "for_user": user, "type": "Alert",
+						"document_type": "HiperTracker Device", "document_name": device,
+						"subject": subject, "email_content": body}).insert(ignore_permissions=True)
 	except Exception:
-		frappe.log_error(title="HiperTracker: could not push device " + ident, message=frappe.get_traceback())
-		frappe.msgprint(
-			"Saved, but it could not be added to Traccar. Check the API token in HiperTracker Settings.",
-			indicator="orange",
-			alert=True,
-		)
+		frappe.log_error(title="HiperTracker: could not notify " + user)
+
+
+def _alert(dev, s, kind, subject, body, extra=None):
+	"""ERP notification + email to the head; repeated at most every 'Repeat Alerts Every' minutes."""
+	now = now_datetime()
+	repeat = max(cint(s.alert_repeat_minutes) or 30, 5)
+	if dev.last_alert_type == kind and dev.last_alert_at and time_diff_in_seconds(now, dev.last_alert_at) < repeat * 60:
+		return
+	for u in _head_users(dev):
+		_bell(u, dev.name, subject, body)
+		email = frappe.db.get_value("User", u, "email")
+		if email:
+			frappe.sendmail(recipients=[email], subject=subject, message=body)
+	frappe.db.set_value("HiperTracker Device", dev.name,
+						{"last_alert_at": now, "last_alert_type": kind, **(extra or {})}, update_modified=False)
+
+
+# ---------------------------------------------------------------------------------------------
+# Scheduled jobs (hooks.py)
+# ---------------------------------------------------------------------------------------------
+
+
+def offline_watch():
+	"""Every 5 minutes: tell the head when a checked-in phone has stopped sending locations."""
+	s = frappe.get_single("HiperTracker Settings")
+	if not cint(s.alert_offline):
+		return
+	stale = max(cint(s.stale_minutes) or 15, 5)
+	duty_mode = cint(s.duty_mode)
+	now = now_datetime()
+	filters = {"active": 1}
+	if duty_mode:
+		filters["on_duty"] = 1
+	for d in frappe.get_all("HiperTracker Device", filters=filters, fields=[
+		"name", "device_label", "employee", "employee_name", "reporting_head", "last_update", "duty_since",
+		"last_latitude", "last_longitude", "last_alert_at", "last_alert_type"]):
+		if duty_mode and not d.employee:
+			continue
+		since = d.last_update or d.duty_since
+		if not since or time_diff_in_seconds(now, since) < stale * 60:
+			continue
+		who = d.employee_name or d.device_label or d.name
+		mins = int(time_diff_in_seconds(now, since) / 60)
+		where = (f'<p>Last known location: <a href="https://www.google.com/maps?q={d.last_latitude},{d.last_longitude}">'
+				 "open in Google Maps</a></p>") if d.last_latitude is not None else ""
+		_alert(d, s, "offline", f"No location from {who} for {mins} minutes",
+			   f"<p><b>{who}</b> is checked in, but their phone has not sent a location since {format_datetime(since)}.</p>"
+			   "<p>The phone may be switched off, without internet, or the HiperTracker app was stopped.</p>"
+			   f'{where}<p><a href="{get_url_to_form("HiperTracker Device", d.name)}">Open in HiperTracker</a></p>',
+			   extra={"last_status": "Offline"})
+
+
+def cleanup():
+	"""Daily: delete locations older than 'Keep Location History (days)'."""
+	days = cint(frappe.db.get_single_value("HiperTracker Settings", "keep_days") or 90)
+	if days > 0:
+		frappe.db.delete("HiperTracker Position", {"device_time": ("<", add_days(now_datetime(), -days))})
 
 
 # ---------------------------------------------------------------------------------------------
@@ -410,6 +428,10 @@ def mobile_config():
 	emp = _my_employee()
 	s = frappe.get_cached_doc("HiperTracker Settings")
 	dev = _my_device(emp, create=True)
+	key = frappe.db.get_value("HiperTracker Device", dev.name, "device_key")
+	if not key:
+		key = frappe.generate_hash(length=20)
+		frappe.db.set_value("HiperTracker Device", dev.name, "device_key", key, update_modified=False)
 	last = _last_log(emp)
 	return {
 		"user": frappe.session.user,
@@ -418,7 +440,9 @@ def mobile_config():
 		"employee_name": emp.employee_name,
 		"identifier": dev.traccar_identifier,
 		"device_label": dev.device_label,
-		"report_url": (s.phone_report_url or "http://gps.hipersignerp.cloud:5055").rstrip("/"),
+		"device_key": key,
+		# the phone sends its locations straight to this ERP, with its device key
+		"report_url": get_url("/api/method/hipertracker_position") + "?key=" + key,
 		"interval": cint(s.phone_interval) or 60,
 		"distance": cint(s.phone_distance) or 50,
 		"duty_mode": cint(s.duty_mode) if s.duty_mode is not None else 1,

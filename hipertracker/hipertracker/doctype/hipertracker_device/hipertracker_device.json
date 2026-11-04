@@ -36,7 +36,16 @@
   "last_latitude",
   "last_longitude",
   "last_speed",
-  "last_address"
+  "last_address",
+  "location_enabled",
+  "gps_off_since",
+  "last_battery",
+  "last_accuracy",
+  "last_course",
+  "last_alert_at",
+  "last_alert_type",
+  "security_section",
+  "device_key"
  ],
  "fields": [
   {
@@ -57,11 +66,11 @@
   {
    "fieldname": "traccar_identifier",
    "fieldtype": "Data",
-   "label": "Traccar Identifier",
+   "label": "Device ID",
    "reqd": 1,
    "unique": 1,
    "in_list_view": 1,
-   "description": "The 'Identifier' number shown in the tracker app on the phone (and in Traccar under the device). This is what links the phone to the person. New devices get one automatically; the setup QR below puts it into the phone."
+   "description": "The 'Identifier' number shown in the HiperTracker app on the phone. This is what links the phone to the person. New devices get one automatically; the setup QR below (or the app's ERP login) puts it into the phone."
   },
   {
    "fieldname": "device_label",
@@ -145,7 +154,7 @@
    "label": "Head (receives alerts)",
    "options": "User",
    "in_standard_filter": 1,
-   "description": "The person to alert when this device switches GPS off. Also create a matching Traccar user for them with an Alarm → GPS Antenna Cut notification."
+   "description": "Gets an email and an ERP notification when this phone switches GPS off or stops reporting while checked in. If empty, the Employee's 'Reports To' manager is used."
   },
   {
    "fieldname": "head_name",
@@ -182,26 +191,28 @@
   {
    "fieldname": "traccar_section",
    "fieldtype": "Section Break",
-   "label": "Live Status (from Traccar)",
+   "label": "Live Status",
    "collapsible": 1
   },
   {
    "fieldname": "traccar_device_id",
    "fieldtype": "Int",
    "label": "Traccar Device ID",
-   "read_only": 1
+   "read_only": 1,
+   "hidden": 1
   },
   {
    "fieldname": "traccar_name",
    "fieldtype": "Data",
    "label": "Name in Traccar",
-   "read_only": 1
+   "read_only": 1,
+   "hidden": 1
   },
   {
    "fieldname": "last_status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "\nOnline\nOffline\nGPS Off\nOff Duty\nNot in Traccar",
+   "options": "\nOnline\nOffline\nGPS Off\nOff Duty\nNo Data\nNot in Traccar",
    "read_only": 1,
    "in_list_view": 1,
    "in_standard_filter": 1
@@ -241,12 +252,75 @@
    "fieldname": "last_address",
    "fieldtype": "Small Text",
    "label": "Last Address",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "location_enabled",
+   "fieldtype": "Check",
+   "label": "GPS On",
+   "default": "1",
    "read_only": 1
+  },
+  {
+   "fieldname": "gps_off_since",
+   "fieldtype": "Datetime",
+   "label": "GPS Off Since",
+   "read_only": 1,
+   "depends_on": "eval:!doc.location_enabled"
+  },
+  {
+   "fieldname": "last_battery",
+   "fieldtype": "Float",
+   "label": "Battery %",
+   "precision": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_accuracy",
+   "fieldtype": "Float",
+   "label": "Accuracy (m)",
+   "precision": "1",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "last_course",
+   "fieldtype": "Float",
+   "label": "Heading",
+   "precision": "0",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "last_alert_at",
+   "fieldtype": "Datetime",
+   "label": "Last Alert Sent",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_alert_type",
+   "fieldtype": "Data",
+   "label": "Last Alert",
+   "read_only": 1,
+   "hidden": 1
+  },
+  {
+   "fieldname": "security_section",
+   "fieldtype": "Section Break",
+   "label": "Phone Key",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "device_key",
+   "fieldtype": "Data",
+   "label": "Device Key",
+   "description": "Secret the phone sends with every location, so nobody else can post locations for this device. Clear it and save to make a new one; the phone then has to log in to ERP again or rescan the setup QR."
   }
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-30 19:00:00.000000",
+ "modified": "2026-11-04 17:30:00.000000",
  "modified_by": "Administrator",
  "module": "HiperTracker",
  "name": "HiperTracker Device",

@@ -52,7 +52,9 @@
   background: var(--subtle-fg, #f9fafb); padding:12px; border-radius:10px; }
 .ht-panel dt { color: var(--text-muted, #6b7280); font-weight:400; }
 .ht-panel dd { margin:0; word-break:break-word; }
-.ht-panel .ht-btns { display:flex; gap:8px; flex-wrap:wrap; }
+.ht-panel .ht-btns { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.ht-panel .ht-route { margin-top:14px; padding-top:12px; border-top:1px solid var(--border-color, #e5e7eb); font-size:13px; }
+.ht-panel .ht-route .ht-btns { margin:8px 0 6px; }
 .ht-badge { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:500; }
 .ht-badge::before { content:""; width:7px; height:7px; border-radius:50%; background: currentColor; }
 .ht-b-online { color:var(--ht-green); background: color-mix(in srgb, var(--ht-green) 12%, transparent); }

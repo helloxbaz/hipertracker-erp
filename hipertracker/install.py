@@ -1,6 +1,6 @@
 # Copyright (c) 2026, Hipersign and contributors
 # For license information, please see license.txt
-"""Sets up HiperTracker on a site: roles, the live map block, sidebar, desktop icon and default settings.
+"""Sets up HiperTracker on a site: roles, the live map block, sidebar, desktop icon, default settings and device keys.
 
 Runs after install and after every migrate, so changes to the map block in this repo
 reach the site with a normal `bench migrate`.
@@ -25,8 +25,16 @@ OLD_CLIENT_SCRIPTS = (
 	"HiperTracker Device - Phone Setup",
 )
 OLD_EVENT_SCRIPT = "HiperTracker Device - Sync to Traccar"
-# made by hand on Nexus; replaced by hipertracker.api.mobile_config / checkin
-OLD_MOBILE_SCRIPTS = ("HiperTracker Mobile Config API", "HiperTracker Check In API")
+# made by hand on Nexus; replaced by hipertracker.api (mobile_config, checkin, position, history, scheduled jobs)
+OLD_MOBILE_SCRIPTS = (
+	"HiperTracker Mobile Config API",
+	"HiperTracker Check In API",
+	"HiperTracker Position API",
+	"HiperTracker History API",
+	"HiperTracker Offline Watch",
+	"HiperTracker Cleanup",
+	"HiperTracker Device - Key",
+)
 
 
 def before_install():
@@ -54,6 +62,7 @@ def setup():
 	make_sidebar()
 	make_desktop_icon()
 	set_default_settings()
+	give_devices_keys()
 	retire_old_server_script()
 	frappe.db.commit()
 
@@ -95,6 +104,8 @@ def make_sidebar():
 		{"label": "Hiper Tracker", "type": "Link", "link_type": "Workspace", "link_to": WORKSPACE, "icon": "map"},
 		{"label": "Devices & People", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Device",
 		 "icon": "smartphone"},
+		{"label": "Location History", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Position",
+		 "icon": "list"},
 		{"label": "Settings", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Settings",
 		 "icon": "settings"},
 	]
@@ -154,6 +165,8 @@ def set_default_settings():
 		"phone_interval": 60,
 		"phone_distance": 50,
 		"alarm_interval": 30,
+		"keep_days": 90,
+		"alert_repeat_minutes": 30,
 	}
 	for key, value in defaults.items():
 		if not s.get(key):
@@ -162,6 +175,12 @@ def set_default_settings():
 	if changed:
 		s.flags.ignore_permissions = True
 		s.save()
+
+
+def give_devices_keys():
+	"""Every device needs a key before its phone can send locations to the ERP."""
+	for name in frappe.get_all("HiperTracker Device", filters={"device_key": ("in", ("", None))}, pluck="name"):
+		frappe.db.set_value("HiperTracker Device", name, "device_key", frappe.generate_hash(length=20), update_modified=False)
 
 
 def retire_old_server_script():

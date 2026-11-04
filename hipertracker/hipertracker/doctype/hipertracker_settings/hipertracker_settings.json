@@ -32,46 +32,57 @@
   "refresh_seconds",
   "rules_section",
   "stale_minutes",
-  "show_unassigned"
+  "show_unassigned",
+  "source_section",
+  "keep_days",
+  "source_column",
+  "alert_offline",
+  "alert_repeat_minutes"
  ],
  "fields": [
   {
    "fieldname": "traccar_section",
    "fieldtype": "Section Break",
-   "label": "Traccar Server"
+   "label": "Traccar (no longer used)",
+   "hidden": 1
   },
   {
    "fieldname": "traccar_url",
    "fieldtype": "Data",
    "label": "Traccar Server URL",
    "default": "https://gps.hipersignerp.cloud",
-   "description": "The address you open Traccar on, e.g. https://gps.hipersignerp.cloud"
+   "description": "The address you open Traccar on, e.g. https://gps.hipersignerp.cloud",
+   "hidden": 1
   },
   {
    "fieldname": "auth_method",
    "fieldtype": "Select",
    "label": "Sign-in Method",
    "options": "API Token\nEmail and Password",
-   "default": "API Token"
+   "default": "API Token",
+   "hidden": 1
   },
   {
    "fieldname": "api_token",
    "fieldtype": "Password",
    "label": "Traccar API Token",
    "depends_on": "eval:doc.auth_method=='API Token'",
-   "description": "In Traccar: Settings → Account (your user) → Token → generate and copy here. Use an admin user so every device is visible."
+   "description": "In Traccar: Settings → Account (your user) → Token → generate and copy here. Use an admin user so every device is visible.",
+   "hidden": 1
   },
   {
    "fieldname": "traccar_email",
    "fieldtype": "Data",
    "label": "Traccar Email",
-   "depends_on": "eval:doc.auth_method=='Email and Password'"
+   "depends_on": "eval:doc.auth_method=='Email and Password'",
+   "hidden": 1
   },
   {
    "fieldname": "traccar_password",
    "fieldtype": "Password",
    "label": "Traccar Password",
-   "depends_on": "eval:doc.auth_method=='Email and Password'"
+   "depends_on": "eval:doc.auth_method=='Email and Password'",
+   "hidden": 1
   },
   {
    "fieldname": "duty_section",
@@ -112,14 +123,16 @@
   {
    "fieldname": "phone_section",
    "fieldtype": "Section Break",
-   "label": "Phone App"
+   "label": "Phone App",
+   "description": "Phones send their locations straight to this ERP (no Traccar server needed)."
   },
   {
    "fieldname": "phone_report_url",
    "fieldtype": "Data",
    "label": "Phone Report URL",
    "default": "http://gps.hipersignerp.cloud:5055",
-   "description": "Where the HiperTracker phone app sends locations (Traccar's device port, usually 5055). Put into the phone by the setup QR on each device."
+   "description": "Where the HiperTracker phone app sends locations (Traccar's device port, usually 5055). Put into the phone by the setup QR on each device.",
+   "hidden": 1
   },
   {
    "fieldname": "app_download_url",
@@ -149,7 +162,8 @@
    "fieldtype": "Check",
    "label": "Create Devices in Traccar Automatically",
    "default": "1",
-   "description": "Saving a device here adds it to Traccar (or renames it) with the same identifier."
+   "description": "Saving a device here adds it to Traccar (or renames it) with the same identifier.",
+   "hidden": 1
   },
   {
    "fieldname": "map_section",
@@ -204,12 +218,43 @@
    "fieldtype": "Check",
    "label": "Show Unassigned Traccar Devices on Map",
    "default": "1",
-   "description": "System Managers also see Traccar devices not yet linked to a person."
+   "description": "System Managers also see Traccar devices not yet linked to a person.",
+   "hidden": 1
+  },
+  {
+   "fieldname": "source_section",
+   "fieldtype": "Section Break",
+   "label": "Alerts to Heads & History"
+  },
+  {
+   "fieldname": "keep_days",
+   "fieldtype": "Int",
+   "label": "Keep Location History (days)",
+   "default": "90",
+   "description": "Older locations are deleted every night."
+  },
+  {
+   "fieldname": "source_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "alert_offline",
+   "fieldtype": "Check",
+   "label": "Alert head when a checked-in phone stops reporting",
+   "default": "1",
+   "description": "Sent after 'Offline After (minutes)' with no location (phone off, no internet or app stopped)."
+  },
+  {
+   "fieldname": "alert_repeat_minutes",
+   "fieldtype": "Int",
+   "label": "Repeat Alerts Every (minutes)",
+   "default": "30",
+   "description": "While the problem continues, the head is reminded at most this often."
   }
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-10-30 19:00:00.000000",
+ "modified": "2026-11-04 17:30:00.000000",
  "modified_by": "Administrator",
  "module": "HiperTracker",
  "name": "HiperTracker Settings",

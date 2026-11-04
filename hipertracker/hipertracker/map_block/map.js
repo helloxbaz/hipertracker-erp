@@ -10,7 +10,7 @@
     Vehicle: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>'
   };
 
-  let state = { data: null, map: null, markers: {}, selected: null, fitted: false, base: null, sat: null };
+  let state = { data: null, map: null, markers: {}, selected: null, fitted: false, base: null, sat: null, route: null, routeDate: null, routeSum: '' };
 
   // stop any timer left from an earlier render of this block
   if (window.__hipertrackerTimer) { clearInterval(window.__hipertrackerTimer); window.__hipertrackerTimer = null; }
@@ -52,13 +52,13 @@
   function initMap(settings) {
     const L = window.L;
     const map = L.map(el('map'), { zoomControl: true, attributionControl: true }).setView(settings.center, settings.zoom);
-    // Google road / hybrid tiles, the same layers Traccar's web app uses
+    // Google road / hybrid tiles
     state.base = L.tileLayer('https://{s}.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}', {
       subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], maxZoom: 20, attribution: 'Map data &copy; Google' }).addTo(map);
     state.sat = L.tileLayer('https://{s}.google.com/vt/lyrs=y&hl=en&x={x}&y={y}&z={z}', {
       subdomains: ['mt0', 'mt1', 'mt2', 'mt3'], maxZoom: 20, attribution: 'Imagery &copy; Google' });
     map.zoomControl.setPosition('bottomright');
-    map.on('click', () => select(null));
+    map.on('click', () => { if (!state.route) select(null); });
     state.map = map;
     setTimeout(() => map.invalidateSize(), 300);
   }
@@ -80,7 +80,7 @@
     const keep = {};
     devices.forEach((d) => {
       if (d.lat == null || d.lon == null) return;
-      const key = String(d.traccar_id);
+      const key = String(d.identifier);
       keep[key] = true;
       const icon = L.divIcon({ className: 'ht-icon', html: chipHtml(d, state.selected === key), iconSize: [0, 0] });
       let m = state.markers[key];
@@ -117,13 +117,12 @@
     const q = (el('search').value || '').toLowerCase().trim();
     const st = el('status').value;
     return state.data.devices.filter((d) => {
-      if (st === 'unassigned' && d.mapped) return false;
-      if (st && st !== 'unassigned') {
+      if (st) {
         if (st === 'offline' && !(d.status === 'offline' || d.status === 'unknown')) return false;
         if (st !== 'offline' && d.status !== st) return false;
       }
       if (!q) return true;
-      return [d.label, d.employee_name, d.department, d.vehicle, d.address, d.identifier, d.traccar_name, d.head_name]
+      return [d.label, d.employee_name, d.department, d.vehicle, d.address, d.identifier, d.head_name]
         .some((v) => v && String(v).toLowerCase().indexOf(q) >= 0);
     });
   }
@@ -133,13 +132,12 @@
     el('listtitle').textContent = 'All Devices (' + state.data.devices.length + ')';
     if (!rows.length) {
       el('rows').innerHTML = '<tr><td colspan="7" class="ht-muted">' +
-        (state.data.devices.length ? 'No devices match the filter.' : 'No devices yet. Add phones in Traccar, then press “Sync from Traccar”.') + '</td></tr>';
+        (state.data.devices.length ? 'No devices match the filter.' : 'No devices yet. Open Devices &amp; People, add a device and scan its setup QR with the phone.') + '</td></tr>';
       return;
     }
     el('rows').innerHTML = rows.map((d) => {
-      const key = String(d.traccar_id);
-      const person = d.mapped ? (esc(d.employee_name) || '<span class="ht-muted">No employee set</span>')
-        : '<span class="ht-link" data-assign="' + key + '">Link to a person</span>';
+      const key = String(d.identifier);
+      const person = esc(d.employee_name) || '<span class="ht-muted">No employee set</span>';
       return '<tr class="ht-row' + (state.selected === key ? ' sel' : '') + '" data-key="' + key + '">' +
         '<td><b>' + esc(d.label) + '</b><div class="ht-sub">ID ' + esc(d.identifier) + '</div></td>' +
         '<td>' + person + (d.head_name ? '<div class="ht-sub">Head: ' + esc(d.head_name) + '</div>' : '') + '</td>' +
@@ -153,19 +151,19 @@
     const m = el('missing');
     if (miss.length) {
       m.style.display = '';
-      m.innerHTML = 'Linked in ERP but not found in Traccar: ' + miss.map((x) =>
+      m.innerHTML = 'Waiting for the first location from: ' + miss.map((x) =>
         '<span class="ht-link" data-record="' + esc(x.record) + '">' + esc(x.label) + (x.employee_name ? ' (' + esc(x.employee_name) + ')' : '') + '</span>').join(', ') +
-        '. Check the identifier matches the one on the phone.';
+        '. Set up those phones with the QR on their device record (or log in to ERP in the app).';
     } else m.style.display = 'none';
   }
 
   function renderPanel() {
     const p = el('panel');
-    const d = state.data && state.data.devices.find((x) => String(x.traccar_id) === state.selected);
+    const d = state.data && state.data.devices.find((x) => String(x.identifier) === state.selected);
     if (!d) { p.style.display = 'none'; return; }
     const rows = [];
     const add = (k, v) => { if (v !== null && v !== undefined && v !== '') rows.push('<dt>' + k + '</dt><dd>' + v + '</dd>'); };
-    add('Person', d.mapped ? (esc(d.employee_name) || '<span class="ht-muted">Not set</span>') : '<span class="ht-link" data-assign="' + d.traccar_id + '">Link to a person</span>');
+    add('Person', esc(d.employee_name) || '<span class="ht-muted">Not set</span>');
     add('Department', esc(d.department));
     add('Vehicle', esc(d.vehicle));
     add('Head', esc(d.head_name));
@@ -173,41 +171,40 @@
     add('Speed', (d.speed || 0) + ' km/h');
     add('Location', esc(place(d)));
     add('Last update', esc(d.last_update ? frappe.datetime.str_to_user(d.last_update) : '—') + ' <span class="ht-muted">(' + ago(d.age_minutes) + ')</span>');
-    if (d.status === 'gps_off') add('GPS', '<b style="color:' + COLORS.gps_off + '">Switched off on the phone</b>');
+    if (d.status === 'gps_off') add('GPS', '<b style="color:' + COLORS.gps_off + '">Switched off on the phone</b>' +
+      (d.gps_off_since ? ' <span class="ht-muted">since ' + esc(frappe.datetime.str_to_user(d.gps_off_since)) + '</span>' : ''));
     if (d.employee) add('Duty', (d.on_duty ? '<b style="color:' + COLORS.online + '">Checked in</b>' : 'Checked out') +
       (d.duty_since ? ' <span class="ht-muted">(' + esc(frappe.datetime.str_to_user(d.duty_since)) + ')</span>' : ''));
     if (d.ignition != null) add('Ignition', d.ignition ? '<span class="ht-badge ht-b-online">ON</span>' : '<span class="ht-badge ht-b-unknown">OFF</span>');
     if (d.battery != null) add('Battery', Math.round(d.battery) + '%' + (d.charging ? ' (charging)' : ''));
     if (d.odometer != null) add('Odometer', (Math.round(d.odometer / 100) / 10).toLocaleString() + ' km');
     if (d.alarm) add('Last alarm', esc(d.alarm));
-    add('Identifier', esc(d.identifier));
-    const traccar = state.data.settings.traccar_url;
+    add('Device ID', esc(d.identifier));
+    if (!state.routeDate) state.routeDate = frappe.datetime.get_today();
     p.innerHTML = '<button class="ht-close" data-act="close">&times;</button>' +
       '<h3>' + esc(d.label) + '</h3>' +
       '<span class="ht-badge ht-b-' + d.status + '">' + LABELS[d.status] + '</span>' +
       '<dl>' + rows.join('') + '</dl>' +
       '<div class="ht-btns">' +
-      (d.record ? '<button class="btn btn-primary btn-sm" data-record="' + esc(d.record) + '">Open Record</button>'
-        : '<button class="btn btn-primary btn-sm" data-assign="' + d.traccar_id + '">Link to a Person</button>') +
+      '<button class="btn btn-primary btn-sm" data-record="' + esc(d.record) + '">Open Record</button>' +
       (d.lat != null ? '<a class="btn btn-default btn-sm" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=' + d.lat + ',' + d.lon + '">Directions</a>' : '') +
-      (traccar ? '<a class="btn btn-default btn-sm" target="_blank" rel="noopener" href="' + esc(traccar) + '/replay">Route History</a>' : '') +
-      '</div>';
+      '</div>' +
+      '<div class="ht-route"><b>Route history</b><div class="ht-btns">' +
+      '<input type="date" class="form-control input-sm" data-el="rdate" value="' + esc(state.routeDate) + '" style="width:150px">' +
+      '<button class="btn btn-default btn-sm" data-act="route">Show route</button>' +
+      (state.route ? '<button class="btn btn-default btn-sm" data-act="unroute">Hide</button>' : '') + '</div>' +
+      '<div class="ht-muted" data-el="rsum">' + (state.routeSum || '') + '</div></div>';
     p.style.display = '';
   }
 
   function select(key, fromMap) {
+    if (key !== state.selected) clearRoute();
     state.selected = key;
     renderMarkers(); renderTable(); renderPanel();
     if (key && !fromMap) {
       const m = state.markers[key];
       if (m) state.map.setView(m.getLatLng(), Math.max(state.map.getZoom(), 14));
     }
-  }
-
-  function assign(key) {
-    const d = state.data.devices.find((x) => String(x.traccar_id) === String(key));
-    if (!d) return;
-    frappe.new_doc('HiperTracker Device', { traccar_identifier: d.identifier, device_label: d.traccar_name || d.label, phone: d.phone || '' });
   }
 
   function showAlert(msg, isErr) {
@@ -218,8 +215,57 @@
     a.style.display = '';
   }
 
+  // ---- route history (positions stored in ERP) ----
+  function clearRoute() {
+    if (state.route) { state.map.removeLayer(state.route); state.route = null; }
+    state.routeSum = '';
+  }
+
+  function showRoute() {
+    const d = state.data && state.data.devices.find((x) => String(x.identifier) === state.selected);
+    if (!d) return;
+    const inp = el('rdate');
+    state.routeDate = (inp && inp.value) || frappe.datetime.get_today();
+    return frappe.call({ method: 'hipertracker_history', args: { device: d.record, date: state.routeDate } }).then((r) => {
+      const data = r.message || {};
+      const L = window.L;
+      clearRoute();
+      const g = L.layerGroup().addTo(state.map);
+      const pts = (data.points || []).map((p) => [p[0], p[1]]);
+      const dot = (ll, color, tip, ring) => L.circleMarker(ll, ring
+        ? { radius: 9, color: color, weight: 3, fillOpacity: 0 }
+        : { radius: 6, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }).bindTooltip(tip).addTo(g);
+      if (pts.length) {
+        L.polyline(pts, { color: '#2563eb', weight: 4, opacity: 0.85 }).addTo(g);
+        dot(pts[0], '#16a34a', 'Start ' + data.points[0][2]);
+        dot(pts[pts.length - 1], '#dc2626', 'Last ' + data.points[data.points.length - 1][2]);
+      }
+      const extra = [];
+      (data.checkins || []).forEach((c) => {
+        if (c.lat == null) return;
+        extra.push([c.lat, c.lon]);
+        dot([c.lat, c.lon], c.log_type === 'IN' ? '#16a34a' : '#6b7280', (c.log_type === 'IN' ? 'Checked in ' : 'Checked out ') + String(c.time).slice(11, 16), true);
+      });
+      (data.events || []).forEach((e) => {
+        if (e.lat == null || e.event === 'GPS On') return;
+        dot([e.lat, e.lon], COLORS.gps_off, e.event + ' ' + String(e.time).slice(11, 16), true);
+      });
+      state.route = g;
+      const all = pts.concat(extra);
+      if (all.length > 1) state.map.fitBounds(all, { padding: [50, 50], maxZoom: 16 });
+      else if (all.length) state.map.setView(all[0], 15);
+      const n = pts.length;
+      const off = (data.events || []).filter((e) => e.event === 'GPS Off').length;
+      state.routeSum = n
+        ? esc(frappe.datetime.str_to_user(data.date)) + ': <b>' + data.distance_km + ' km</b>, ' + data.points[0][2] + ' – ' + data.points[n - 1][2] +
+          (off ? ' · <b style="color:' + COLORS.gps_off + '">GPS off ' + off + '×</b>' : '')
+        : 'No route recorded on ' + esc(frappe.datetime.str_to_user(data.date)) + '.';
+      renderPanel();
+    });
+  }
+
   function load(sync) {
-    return frappe.call({ method: 'hipertracker.api.live', args: { sync: sync ? 1 : 0 } }).then((r) => {
+    return frappe.call({ method: 'hipertracker_live', args: { sync: 0 } }).then((r) => {
       const data = r.message || {};
       state.data = data;
       data.devices = data.devices || [];
@@ -231,8 +277,6 @@
         const gps = data.devices.filter((d) => d.status === 'gps_off');
         const msgs = [];
         if (gps.length) msgs.push('<b>GPS switched off:</b> ' + gps.map((d) => esc(d.label) + (d.employee_name ? ' (' + esc(d.employee_name) + ')' : '')).join(', '));
-        if (data.is_manager && data.unmapped_count) msgs.push(data.unmapped_count + ' device(s) are not linked to a person yet — filter by “Not linked to a person” to link them.');
-        if (sync && data.created) msgs.push(data.created + ' new device(s) added from Traccar.');
         showAlert(msgs.join('<br>'), false);
       }
       renderKpis(); renderMarkers(); renderTable(); renderPanel();
@@ -243,12 +287,14 @@
 
   // ---- events ----
   R.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-act],[data-layer],[data-assign],[data-record],[data-focus],tr.ht-row');
+    if (e.target.matches && e.target.matches('input')) return;
+    const t = e.target.closest('[data-act],[data-layer],[data-record],[data-focus],tr.ht-row');
     if (!t) return;
     if (t.dataset.act === 'refresh') return load(false);
-    if (t.dataset.act === 'sync') { frappe.show_alert({ message: 'Syncing devices from Traccar…', indicator: 'blue' }); return load(true); }
+    if (t.dataset.act === 'route') return showRoute();
+    if (t.dataset.act === 'unroute') { clearRoute(); return renderPanel(); }
     if (t.dataset.act === 'settings') return frappe.set_route('Form', 'HiperTracker Settings');
-    if (t.dataset.act === 'close') return select(null);
+    if (t.dataset.act === 'close') { clearRoute(); return select(null); }
     if (t.dataset.act === 'fullscreen') {
       R.querySelector('.ht-mapwrap').classList.toggle('ht-full');
       return setTimeout(() => state.map && state.map.invalidateSize(), 200);
@@ -259,12 +305,12 @@
       else { state.map.removeLayer(state.sat); state.base.addTo(state.map); }
       return;
     }
-    if (t.dataset.assign) { e.stopPropagation(); return assign(t.dataset.assign); }
     if (t.dataset.record) { e.stopPropagation(); return frappe.set_route('Form', 'HiperTracker Device', t.dataset.record); }
     if (t.dataset.focus) { e.stopPropagation(); return select(t.dataset.focus); }
     if (t.dataset.key) return select(t.dataset.key);
   });
   el('search').addEventListener('input', () => state.data && renderTable());
+  R.addEventListener('change', (e) => { if (e.target.dataset && e.target.dataset.el === 'rdate') state.routeDate = e.target.value; });
   el('status').addEventListener('change', () => state.data && renderTable());
 
   loadLeaflet().then(() => load(false)).then((data) => {

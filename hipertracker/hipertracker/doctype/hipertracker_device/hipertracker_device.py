@@ -24,8 +24,5 @@ class HiperTrackerDevice(Document):
 		self.traccar_identifier = self.traccar_identifier.strip()
 		if not self.device_label:
 			self.device_label = self.employee_name or self.traccar_identifier
-
-	def on_update(self):
-		from hipertracker.api import push_device
-
-		push_device(self)
+		# the phone sends this key with every location, so nobody else can post locations for the device
+		self.device_key = (self.device_key or "").strip() or frappe.generate_hash(length=20)

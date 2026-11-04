@@ -1,0 +1,184 @@
+{
+ "actions": [],
+ "autoname": "autoincrement",
+ "creation": "2026-11-04 17:30:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "device",
+  "device_label",
+  "employee",
+  "device_time",
+  "event",
+  "on_duty",
+  "column_a",
+  "latitude",
+  "longitude",
+  "accuracy",
+  "speed",
+  "column_b",
+  "course",
+  "altitude",
+  "battery",
+  "charging",
+  "location_enabled"
+ ],
+ "fields": [
+  {
+   "read_only": 1,
+   "fieldname": "device",
+   "fieldtype": "Link",
+   "label": "Device",
+   "options": "HiperTracker Device",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "device_label",
+   "fieldtype": "Data",
+   "label": "Display Name"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "label": "Employee",
+   "options": "Employee",
+   "in_standard_filter": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "device_time",
+   "fieldtype": "Datetime",
+   "label": "Time",
+   "in_list_view": 1,
+   "search_index": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "event",
+   "fieldtype": "Select",
+   "label": "Event",
+   "options": "Location\nGPS Off\nGPS On\nGPS Off Alarm",
+   "default": "Location",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "on_duty",
+   "fieldtype": "Check",
+   "label": "Checked In"
+  },
+  {
+   "fieldname": "column_a",
+   "fieldtype": "Column Break"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "latitude",
+   "fieldtype": "Float",
+   "label": "Latitude",
+   "precision": "7",
+   "in_list_view": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "longitude",
+   "fieldtype": "Float",
+   "label": "Longitude",
+   "precision": "7",
+   "in_list_view": 1
+  },
+  {
+   "read_only": 1,
+   "fieldname": "accuracy",
+   "fieldtype": "Float",
+   "label": "Accuracy (m)",
+   "precision": "1"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "speed",
+   "fieldtype": "Float",
+   "label": "Speed (km/h)",
+   "precision": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_b",
+   "fieldtype": "Column Break"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "course",
+   "fieldtype": "Float",
+   "label": "Heading",
+   "precision": "0"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "altitude",
+   "fieldtype": "Float",
+   "label": "Altitude (m)",
+   "precision": "0"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "battery",
+   "fieldtype": "Float",
+   "label": "Battery %",
+   "precision": "0"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "charging",
+   "fieldtype": "Check",
+   "label": "Charging"
+  },
+  {
+   "read_only": 1,
+   "fieldname": "location_enabled",
+   "fieldtype": "Check",
+   "label": "GPS On",
+   "default": "1"
+  }
+ ],
+ "in_create": 1,
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-04 17:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "HiperTracker",
+ "name": "HiperTracker Position",
+ "naming_rule": "Autoincrement",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "delete": 1,
+   "export": 1
+  },
+  {
+   "role": "HiperTracker Manager",
+   "read": 1,
+   "report": 1,
+   "delete": 1,
+   "export": 1
+  },
+  {
+   "role": "HiperTracker User",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "device_time",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "device_label",
+ "track_changes": 0
+}
