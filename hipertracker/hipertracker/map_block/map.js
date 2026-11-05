@@ -229,7 +229,7 @@
   // trips and stops of the shown day, in time order
   function routeList() {
     const r = state.routeData;
-    if (!r || !((r.trips || []).length || (r.stops || []).length)) return '';
+    if (!r || !((r.trips || []).length || (r.stops || []).length || (r.speeding || []).length)) return '';
     const items = [];
     (r.trips || []).forEach((t, i) => items.push({ at: t.start, html:
       '<div class="ht-ri" data-trip="' + i + '"><span class="ht-ri-ico ht-ri-trip">&#10148;</span><div><b>' + t.start + ' – ' + t.end + '</b> · ' +
@@ -237,6 +237,9 @@
     (r.stops || []).forEach((st, i) => items.push({ at: st.start, html:
       '<div class="ht-ri" data-stop="' + i + '"><span class="ht-ri-ico ht-ri-stop">P</span><div><b>' + st.start + ' – ' + (st.ongoing ? 'now' : st.end) + '</b> · stopped ' +
       mins(st.minutes) + '<div class="ht-sub">' + Number(st.lat).toFixed(5) + ', ' + Number(st.lon).toFixed(5) + '</div></div></div>' }));
+    (r.speeding || []).forEach((sp, i) => items.push({ at: sp.start, html:
+      '<div class="ht-ri" data-speed="' + i + '"><span class="ht-ri-ico ht-ri-speed">!</span><div><b>' + sp.start + (sp.end !== sp.start ? ' – ' + sp.end : '') +
+      '</b> · <span style="color:#dc2626">over speed</span><div class="ht-sub">top ' + sp.max_speed + ' km/h (limit ' + r.speed_limit + ')</div></div></div>' }));
     items.sort((a, b) => (a.at < b.at ? -1 : 1));
     return '<div class="ht-rlist">' + items.map((x) => x.html).join('') + '</div>';
   }
@@ -251,6 +254,10 @@
       const seg = r.points.slice(t.s, t.e + 1).map((p) => [p[0], p[1]]);
       state.focus = L.polyline(seg, { color: '#f59e0b', weight: 7, opacity: 0.9 }).addTo(state.map);
       state.map.fitBounds(seg, { padding: [60, 60], maxZoom: 16 });
+    } else if (kind === 'speed') {
+      const sp = r.speeding[i];
+      state.focus = L.circle([sp.lat, sp.lon], { radius: 120, color: '#dc2626', weight: 2, fillOpacity: 0.12 }).addTo(state.map);
+      state.map.setView([sp.lat, sp.lon], 16);
     } else {
       const st = r.stops[i];
       state.focus = L.circle([st.lat, st.lon], { radius: 150, color: '#7c3aed', weight: 2, fillOpacity: 0.12 }).addTo(state.map);
@@ -291,6 +298,10 @@
         L.marker([st.lat, st.lon], { icon: L.divIcon({ className: 'ht-icon', html: '<span class="ht-stop">P</span>', iconSize: [0, 0] }) })
           .bindTooltip('Stopped ' + mins(st.minutes) + ' (' + st.start + ' – ' + (st.ongoing ? 'now' : st.end) + ')').addTo(g);
       });
+      (data.speeding || []).forEach((sp) => {
+        L.circleMarker([sp.lat, sp.lon], { radius: 8, color: '#fff', weight: 2, fillColor: '#dc2626', fillOpacity: 1 })
+          .bindTooltip('Over speed ' + sp.max_speed + ' km/h (' + sp.start + (sp.end !== sp.start ? ' – ' + sp.end : '') + ')').addTo(g);
+      });
       state.route = g;
       state.routeData = data;
       const all = pts.concat(extra);
@@ -301,7 +312,8 @@
       state.routeSum = n
         ? esc(frappe.datetime.str_to_user(data.date)) + ': <b>' + data.distance_km + ' km</b>, ' + (data.trips || []).length + ' trip(s), ' +
           (data.stops || []).length + ' stop(s)<br>Moving ' + mins(data.moving_minutes || 0) + ' · stopped ' + mins(data.stopped_minutes || 0) +
-          (off ? ' · <b style="color:' + COLORS.gps_off + '">GPS off ' + off + '×</b>' : '')
+          (off ? ' · <b style="color:' + COLORS.gps_off + '">GPS off ' + off + '×</b>' : '') +
+          ((data.speeding || []).length ? ' · <b style="color:#dc2626">over ' + data.speed_limit + ' km/h ' + data.speeding.length + '×</b>' : '')
         : 'No route recorded on ' + esc(frappe.datetime.str_to_user(data.date)) + '.';
       renderPanel();
     });
@@ -331,10 +343,11 @@
   // ---- events ----
   R.addEventListener('click', (e) => {
     if (e.target.matches && e.target.matches('input')) return;
-    const t = e.target.closest('[data-act],[data-layer],[data-record],[data-focus],[data-trip],[data-stop],tr.ht-row');
+    const t = e.target.closest('[data-act],[data-layer],[data-record],[data-focus],[data-trip],[data-stop],[data-speed],tr.ht-row');
     if (!t) return;
     if (t.dataset.trip) return focusItem('trip', Number(t.dataset.trip));
     if (t.dataset.stop) return focusItem('stop', Number(t.dataset.stop));
+    if (t.dataset.speed) return focusItem('speed', Number(t.dataset.speed));
     if (t.dataset.act === 'refresh') return load(false);
     if (t.dataset.act === 'route') return showRoute();
     if (t.dataset.act === 'unroute') { clearRoute(); return renderPanel(); }

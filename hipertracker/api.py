@@ -128,11 +128,12 @@ def _route(device, date=None):
 	rows = frappe.get_all(
 		"HiperTracker Position",
 		filters=[["device", "=", device], ["device_time", ">=", start], ["device_time", "<=", end]],
-		fields=["device_time", "latitude", "longitude", "speed", "event", "accuracy"],
+		fields=["device_time", "latitude", "longitude", "speed", "event", "accuracy", "over_speed"],
 		order_by="device_time asc",
 		limit_page_length=20000,
 	)
-	points, pts, events, dist = [], [], [], 0.0
+	points, pts, events, speeding, dist = [], [], [], [], 0.0
+	in_spell = False
 	for r in rows:
 		if r.event != "Location":
 			events.append({"time": str(r.device_time), "event": r.event, "lat": r.latitude, "lon": r.longitude})
@@ -143,6 +144,17 @@ def _route(device, date=None):
 		if pts:
 			dist += _km(pts[-1][0], pts[-1][1], lat, lon)
 		points.append([lat, lon, str(r.device_time)[11:16], flt(r.speed)])
+		# over-speed spells: consecutive readings over the limit count as one
+		if r.over_speed:
+			hhmm_ = str(r.device_time)[11:16]
+			if in_spell and speeding:
+				sp = speeding[-1]
+				sp["end"] = hhmm_
+				if flt(r.speed) > sp["max_speed"]:
+					sp.update(max_speed=round(flt(r.speed)), lat=lat, lon=lon)
+			else:
+				speeding.append({"start": hhmm_, "end": hhmm_, "max_speed": round(flt(r.speed)), "lat": lat, "lon": lon})
+		in_spell = bool(r.over_speed)
 		pts.append([lat, lon, get_datetime(r.device_time), flt(r.speed)])
 	stop_min = max(cint(frappe.db.get_single_value("HiperTracker Settings", "stop_minutes")) or 5, 1)
 	trips, stops = trips_and_stops(pts, stop_min, now_datetime())
@@ -150,7 +162,9 @@ def _route(device, date=None):
 	for x in trips + stops:
 		x["start"], x["end"] = hhmm(x["start"]), hhmm(x["end"])
 	checkins = []
-	emp = frappe.db.get_value("HiperTracker Device", device, "employee")
+	dv = frappe.db.get_value("HiperTracker Device", device, ["employee", "speed_limit"], as_dict=True) or frappe._dict()
+	emp = dv.employee
+	limit = cint(dv.speed_limit) or cint(frappe.db.get_single_value("HiperTracker Settings", "speed_limit"))
 	if emp:
 		checkins = [
 			{"log_type": c.log_type, "time": str(c.time), "lat": c.latitude, "lon": c.longitude}
@@ -163,7 +177,7 @@ def _route(device, date=None):
 		]
 	return {
 		"date": str(day), "points": points, "events": events, "checkins": checkins, "distance_km": round(dist, 1),
-		"trips": trips, "stops": stops,
+		"trips": trips, "stops": stops, "speeding": speeding, "speed_limit": limit,
 		"moving_minutes": sum(t["minutes"] for t in trips), "stopped_minutes": sum(st["minutes"] for st in stops),
 	}
 
@@ -251,7 +265,8 @@ def position(**a):
 	"""
 	s = frappe.get_cached_doc("HiperTracker Settings")
 	fields = ["name", "device_label", "employee", "employee_name", "active", "on_duty", "device_key", "reporting_head",
-			  "last_update", "location_enabled", "gps_off_since", "last_alert_at", "last_alert_type"]
+			  "last_update", "location_enabled", "gps_off_since", "last_alert_at", "last_alert_type",
+			  "speed_limit", "last_speed"]
 	ident = str(a.get("id") or a.get("deviceid") or "").strip()
 	key = str(a.get("key") or "").strip()
 	dev = frappe.db.get_value("HiperTracker Device", ident, fields, as_dict=True) if ident else None
@@ -299,6 +314,10 @@ def position(**a):
 	batt = _num(a.get("batt"))
 	if batt is not None and batt <= 1:
 		batt *= 100
+	# over the speed limit (the device's own limit, else the one in Settings); rough fixes don't count
+	limit = cint(dev.speed_limit) or cint(s.speed_limit)
+	acc = _num(a.get("accuracy"))
+	over = 1 if (limit > 0 and speed and speed > limit and (acc is None or acc <= 50)) else 0
 	event = "Location"
 	if alarm == "gpsAntennaCut":
 		event = "GPS Off Alarm"
@@ -313,6 +332,7 @@ def position(**a):
 		"latitude": lat, "longitude": lon, "accuracy": _num(a.get("accuracy")), "speed": speed,
 		"course": _num(a.get("bearing")), "altitude": _num(a.get("altitude")), "battery": batt,
 		"charging": _flag(a.get("charge")) or 0, "location_enabled": gps_on,
+		"over_speed": over,
 	}).insert(ignore_permissions=True)
 
 	# the live state only moves forward (buffered old points just go into the history)
@@ -341,6 +361,12 @@ def position(**a):
 		_alert(dev, s, "gps_off", f"GPS switched off: {who}",
 			   f"<p><b>{who}</b> has switched off location (GPS) on their phone and has not turned it back on"
 			   f" after the reminders on the phone.</p><p>Since: {format_datetime(dev.gps_off_since or when)}</p>{where}"
+			   f'<p><a href="{get_url_to_form("HiperTracker Device", dev.name)}">Open in HiperTracker</a></p>')
+	elif over and newest and cint(s.speed_alert) and flt(dev.last_speed) > limit:
+		# two readings in a row over the limit, so a single GPS jump doesn't raise an alert
+		where = f'<p>Location: <a href="https://www.google.com/maps?q={lat},{lon}">open in Google Maps</a></p>' if lat is not None else ""
+		_alert(dev, s, "speeding", f"Over speed: {who} at {int(speed)} km/h",
+			   f"<p><b>{who}</b> is going <b>{int(speed)} km/h</b> (limit {limit} km/h) at {format_datetime(when)}.</p>{where}"
 			   f'<p><a href="{get_url_to_form("HiperTracker Device", dev.name)}">Open in HiperTracker</a></p>')
 	elif gps_on and newest and dev.last_alert_type == "gps_off" and not dev.location_enabled:
 		for u in _head_users(dev):

@@ -42,7 +42,11 @@
   "auto_add_devices",
   "require_device_key",
   "trips_section",
-  "stop_minutes"
+  "stop_minutes",
+  "speed_section",
+  "speed_limit",
+  "speed_column",
+  "speed_alert"
  ],
  "fields": [
   {
@@ -285,6 +289,28 @@
    "label": "Stop After (minutes)",
    "default": "5",
    "description": "Staying within about 150 m for this long counts as a stop (or idle time). The movement between two stops is a trip."
+  },
+  {
+   "fieldname": "speed_section",
+   "fieldtype": "Section Break",
+   "label": "Speed"
+  },
+  {
+   "fieldname": "speed_limit",
+   "fieldtype": "Int",
+   "label": "Speed Limit (km/h)",
+   "default": "80",
+   "description": "Going faster than this is recorded as over-speeding. A device can have its own limit (e.g. lower for trucks). 0 = off."
+  },
+  {
+   "fieldname": "speed_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "speed_alert",
+   "fieldtype": "Check",
+   "label": "Alert head when someone goes over the limit",
+   "default": "1"
   }
  ],
  "index_web_pages_for_search": 0,

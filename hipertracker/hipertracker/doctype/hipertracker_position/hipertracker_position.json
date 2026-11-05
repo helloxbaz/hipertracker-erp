@@ -21,7 +21,8 @@
   "altitude",
   "battery",
   "charging",
-  "location_enabled"
+  "location_enabled",
+  "over_speed"
  ],
  "fields": [
   {
@@ -144,6 +145,15 @@
    "fieldtype": "Check",
    "label": "GPS On",
    "default": "1"
+  },
+  {
+   "default": "0",
+   "fieldname": "over_speed",
+   "fieldtype": "Check",
+   "in_list_view": 0,
+   "in_standard_filter": 1,
+   "label": "Over Speed",
+   "read_only": 1
   }
  ],
  "in_create": 1,

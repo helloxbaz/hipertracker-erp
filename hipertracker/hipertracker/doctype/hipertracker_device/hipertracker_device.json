@@ -45,7 +45,9 @@
   "last_alert_at",
   "last_alert_type",
   "security_section",
-  "device_key"
+  "device_key",
+  "limits_section",
+  "speed_limit"
  ],
  "fields": [
   {
@@ -316,6 +318,19 @@
    "fieldtype": "Data",
    "label": "Device Key",
    "description": "Secret the phone sends with every location, so nobody else can post locations for this device. Clear it and save to make a new one; the phone then has to log in to ERP again or rescan the setup QR."
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "limits_section",
+   "fieldtype": "Section Break",
+   "label": "Limits"
+  },
+  {
+   "fieldname": "speed_limit",
+   "fieldtype": "Int",
+   "label": "Speed Limit (km/h)",
+   "non_negative": 1,
+   "description": "Leave 0 to use the limit in HiperTracker Settings."
   }
  ],
  "index_web_pages_for_search": 0,

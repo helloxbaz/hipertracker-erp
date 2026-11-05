@@ -114,6 +114,12 @@ window.htmini = window.htmini && window.htmini.v >= 2 ? window.htmini : (functio
 				.bindTooltip("Stopped " + mins(st.minutes) + " (" + st.start + " – " + (st.ongoing ? "now" : st.end) + ")")
 				.addTo(g);
 		});
+		// over the speed limit: red markers at the top speed of each spell
+		(data.speeding || []).forEach((sp) => {
+			L.circleMarker([sp.lat, sp.lon], { radius: 8, color: "#fff", weight: 2, fillColor: "#dc2626", fillOpacity: 1 })
+				.bindTooltip("Over speed " + sp.max_speed + " km/h (" + sp.start + (sp.end !== sp.start ? " – " + sp.end : "") + ")")
+				.addTo(g);
+		});
 		const all = pts.concat(extra);
 		if (all.length > 1) map.fitBounds(all, { padding: [40, 40], maxZoom: 16 });
 		else if (all.length) map.setView(all[0], 15);
@@ -129,7 +135,8 @@ window.htmini = window.htmini && window.htmini.v >= 2 ? window.htmini : (functio
 		return "<b>" + esc(frappe.datetime.str_to_user(data.date)) + "</b>: " + data.distance_km + " km, " +
 			(data.trips || []).length + " trip(s), " + (data.stops || []).length + " stop(s) · moving " +
 			mins(data.moving_minutes || 0) + ", stopped " + mins(data.stopped_minutes || 0) +
-			(off ? ' · <b style="color:' + COLORS.gps_off + '">GPS switched off ' + off + " time(s)</b>" : "");
+			(off ? ' · <b style="color:' + COLORS.gps_off + '">GPS switched off ' + off + " time(s)</b>" : "") +
+			((data.speeding || []).length ? ' · <b style="color:#dc2626">Over ' + data.speed_limit + " km/h " + data.speeding.length + " time(s)</b>" : "");
 	}
 
 	// trips and stops in time order, as a small table under the map
@@ -141,13 +148,16 @@ window.htmini = window.htmini && window.htmini.v >= 2 ? window.htmini : (functio
 		(data.stops || []).forEach((st) => rows.push([st.start,
 			'<span style="color:#7c3aed">&#9208; Stop</span>', st.start + " – " + (st.ongoing ? "now" : st.end),
 			mins(st.minutes) + ' · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' + st.lat + "," + st.lon + '">map</a>']));
+		(data.speeding || []).forEach((sp) => rows.push([sp.start,
+			'<span style="color:#dc2626">&#9888; Over speed</span>', sp.start + (sp.end !== sp.start ? " – " + sp.end : ""),
+			"top " + sp.max_speed + " km/h (limit " + data.speed_limit + ') · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' + sp.lat + "," + sp.lon + '">map</a>']));
 		if (!rows.length) return "";
 		rows.sort((a, b) => (a[0] < b[0] ? -1 : 1));
 		return '<table class="table table-sm" style="margin-top:8px;font-size:13px"><tbody>' +
 			rows.map((r) => "<tr><td>" + r[1] + "</td><td>" + r[2] + "</td><td>" + r[3] + "</td></tr>").join("") + "</tbody></table>";
 	}
 
-	return { v: 2, COLORS, LABELS, esc, ago, place, badge, leaflet, makeMap, marker, update, drawRoute, routeSummary, routeTable };
+	return { v: 3, COLORS, LABELS, esc, ago, place, badge, leaflet, makeMap, marker, update, drawRoute, routeSummary, routeTable };
 })();
 
 // HiperTracker Device list: live map of all devices above the list.
