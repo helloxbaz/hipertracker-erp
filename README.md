@@ -19,7 +19,7 @@ Every phone has a **Device ID** (e.g. `48213907`) and a private **device key**. 
 - the worker logs in to the app with their ERP username and password (their Employee needs that *User ID*); a record is created for them automatically, or
 - open the record and scan its **Phone setup QR** with the app (⚙ Settings → QR icon).
 
-The phone then posts its locations to `/api/method/hipertracker_position` with its key. Locations without the right key are ignored.
+Or, like Traccar, just type the server address in the app: **`https://nexus365.hipersignerp.cloud`** (the same for everyone). The phone is known by its *Identifier*; a phone ERP hasn't seen yet is added to Devices & People as *Phone &lt;ID&gt;* and you only set its Employee. Turn on *Require device key* in HiperTracker Settings to accept only phones set up by login or QR.
 
 ## Installation
 

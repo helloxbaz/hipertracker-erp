@@ -191,23 +191,30 @@ def position(**a):
 	altitude, accuracy, batt, charge, alarm, locationEnabled; the device key comes in the URL (?key=).
 	Always answers 200, so a phone never gets stuck retrying a point that was rejected.
 	"""
+	s = frappe.get_cached_doc("HiperTracker Settings")
+	fields = ["name", "device_label", "employee", "employee_name", "active", "on_duty", "device_key", "reporting_head",
+			  "last_update", "location_enabled", "gps_off_since", "last_alert_at", "last_alert_type"]
 	ident = str(a.get("id") or a.get("deviceid") or "").strip()
-	dev = frappe.db.get_value(
-		"HiperTracker Device", ident,
-		["name", "device_label", "employee", "employee_name", "active", "on_duty", "device_key", "reporting_head",
-		 "last_update", "location_enabled", "gps_off_since", "last_alert_at", "last_alert_type"],
-		as_dict=True,
-	) if ident else None
+	key = str(a.get("key") or "").strip()
+	dev = frappe.db.get_value("HiperTracker Device", ident, fields, as_dict=True) if ident else None
+	# like Traccar, a phone is known by its ID; a new ID is added so it only needs an Employee set
+	ok_ident = 4 <= len(ident) <= 40 and all(c.isalnum() or c in "-_." for c in ident)
+	if not dev and ok_ident and a.get("lat") and cint(s.auto_add_devices):
+		frappe.get_doc({"doctype": "HiperTracker Device", "traccar_identifier": ident, "device_label": f"Phone {ident}",
+						"tracks": "Person", "active": 1}).insert(ignore_permissions=True)
+		dev = frappe.db.get_value("HiperTracker Device", ident, fields, as_dict=True)
 	if not dev:
 		return {"ok": 0, "msg": "unknown device"}
-	if (dev.device_key or "") and str(a.get("key") or "").strip() != dev.device_key:
+	# the key (sent by phones set up by ERP login or QR) is only required when 'Require device key' is on
+	if key and key != (dev.device_key or ""):
 		return {"ok": 0, "msg": "wrong device key"}
+	if not key and cint(s.require_device_key):
+		return {"ok": 0, "msg": "device key required"}
 	if not dev.active:
 		return {"ok": 0, "msg": "device not active"}
 	if not (a.get("lat") or a.get("locationEnabled") or a.get("alarm")):
 		return {"ok": 1, "msg": "nothing to record"}  # e.g. the app registering its push token
 
-	s = frappe.get_cached_doc("HiperTracker Settings")
 	now = now_datetime()
 	when = now
 	ts = _num(a.get("timestamp"))

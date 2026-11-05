@@ -37,7 +37,10 @@
   "keep_days",
   "source_column",
   "alert_offline",
-  "alert_repeat_minutes"
+  "alert_repeat_minutes",
+  "phone_link_column",
+  "auto_add_devices",
+  "require_device_key"
  ],
  "fields": [
   {
@@ -250,11 +253,29 @@
    "label": "Repeat Alerts Every (minutes)",
    "default": "30",
    "description": "While the problem continues, the head is reminded at most this often."
+  },
+  {
+   "fieldname": "phone_link_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "auto_add_devices",
+   "fieldtype": "Check",
+   "label": "Add new phones automatically",
+   "default": "1",
+   "description": "A phone that sends a location with an ID ERP doesn't know yet is added to Devices & People as 'Phone <ID>'. Open it and set the Employee."
+  },
+  {
+   "fieldname": "require_device_key",
+   "fieldtype": "Check",
+   "label": "Require device key",
+   "default": "0",
+   "description": "Off: phones only need the server address (e.g. https://nexus365.hipersignerp.cloud) and their ID, like Traccar. On: only phones set up by ERP login or setup QR (which carry the device's key) are accepted."
   }
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-11-04 17:30:00.000000",
+ "modified": "2026-11-05 17:45:00.000000",
  "modified_by": "Administrator",
  "module": "HiperTracker",
  "name": "HiperTracker Settings",
