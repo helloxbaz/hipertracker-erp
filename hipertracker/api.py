@@ -132,18 +132,23 @@ def _route(device, date=None):
 		order_by="device_time asc",
 		limit_page_length=20000,
 	)
-	points, events, dist, prev = [], [], 0.0, None
+	points, pts, events, dist = [], [], [], 0.0
 	for r in rows:
 		if r.event != "Location":
 			events.append({"time": str(r.device_time), "event": r.event, "lat": r.latitude, "lon": r.longitude})
 			continue
 		if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > 200):
 			continue  # very rough fixes make zig-zags
-		p = [round(flt(r.latitude), 6), round(flt(r.longitude), 6), str(r.device_time)[11:16], flt(r.speed)]
-		if prev:
-			dist += _km(prev[0], prev[1], p[0], p[1])
-		points.append(p)
-		prev = p
+		lat, lon = round(flt(r.latitude), 6), round(flt(r.longitude), 6)
+		if pts:
+			dist += _km(pts[-1][0], pts[-1][1], lat, lon)
+		points.append([lat, lon, str(r.device_time)[11:16], flt(r.speed)])
+		pts.append([lat, lon, get_datetime(r.device_time), flt(r.speed)])
+	stop_min = max(cint(frappe.db.get_single_value("HiperTracker Settings", "stop_minutes")) or 5, 1)
+	trips, stops = trips_and_stops(pts, stop_min, now_datetime())
+	hhmm = lambda d: str(d)[11:16]  # noqa: E731
+	for x in trips + stops:
+		x["start"], x["end"] = hhmm(x["start"]), hhmm(x["end"])
 	checkins = []
 	emp = frappe.db.get_value("HiperTracker Device", device, "employee")
 	if emp:
@@ -156,7 +161,56 @@ def _route(device, date=None):
 				order_by="time asc",
 			)
 		]
-	return {"date": str(day), "points": points, "events": events, "checkins": checkins, "distance_km": round(dist, 1)}
+	return {
+		"date": str(day), "points": points, "events": events, "checkins": checkins, "distance_km": round(dist, 1),
+		"trips": trips, "stops": stops,
+		"moving_minutes": sum(t["minutes"] for t in trips), "stopped_minutes": sum(st["minutes"] for st in stops),
+	}
+
+
+STOP_RADIUS_KM = 0.15
+
+
+def trips_and_stops(pts, stop_min, now):
+	"""Split one day's points ([lat, lon, datetime, km/h], oldest first) into stops and trips.
+
+	A stop is staying within ~150 m for at least `stop_min` minutes; this also covers the phone going
+	quiet while parked, because the app pauses sending when it isn't moving. Trips are the movements
+	between stops (shorter than 300 m is GPS jitter, not a trip).
+	"""
+	n = len(pts)
+	if not n:
+		return [], []
+	stops, a, i = [], 0, 1
+	while i <= n:
+		if i < n and _km(pts[a][0], pts[a][1], pts[i][0], pts[i][1]) <= STOP_RADIUS_KM:
+			i += 1
+			continue
+		e = i - 1
+		ongoing = e == n - 1 and (now - pts[e][2]).total_seconds() < 20 * 60
+		secs = ((now if ongoing else pts[e][2]) - pts[a][2]).total_seconds()
+		if secs >= stop_min * 60:
+			stops.append({"s": a, "e": e, "start": pts[a][2], "end": now if ongoing else pts[e][2],
+						  "minutes": int(secs // 60), "lat": pts[a][0], "lon": pts[a][1], "ongoing": ongoing})
+		a, i = i, i + 1
+	bounds, prev_end = [], 0
+	for st in stops:
+		bounds.append((prev_end, st["s"]))
+		prev_end = st["e"]
+	bounds.append((prev_end, n - 1))
+	trips = []
+	for s, e in bounds:
+		if e <= s:
+			continue
+		dist = sum(_km(pts[k][0], pts[k][1], pts[k + 1][0], pts[k + 1][1]) for k in range(s, e))
+		if dist < 0.3:
+			continue
+		secs = (pts[e][2] - pts[s][2]).total_seconds()
+		trips.append({"s": s, "e": e, "start": pts[s][2], "end": pts[e][2], "minutes": int(secs // 60),
+					  "distance_km": round(dist, 1), "max_speed": round(max(p[3] or 0 for p in pts[s:e + 1])),
+					  "avg_speed": round(dist / (secs / 3600.0)) if secs > 0 else 0,
+					  "from": pts[s][:2], "to": pts[e][:2]})
+	return trips, stops
 
 
 def _km(lat1, lon1, lat2, lon2):
@@ -544,7 +598,7 @@ def my_day(days=14):
 		limit_page_length=500,
 	)
 	device = frappe.db.get_value("HiperTracker Device", {"employee": emp.name}, "name")
-	summary = {"distance_km": 0, "points": 0, "gps_off": 0, "first": None, "last": None}
+	summary = {"distance_km": 0, "points": 0, "gps_off": 0, "first": None, "last": None, "trips": [], "stops": []}
 	if device:
 		route = _route(device, today())  # the worker's own phone; no device permission needed
 		points = route["points"]
@@ -554,6 +608,8 @@ def my_day(days=14):
 			gps_off=len([e for e in route["events"] if e["event"] == "GPS Off"]),
 			first=f"{today()} {points[0][2]}:00" if points else None,
 			last=f"{today()} {points[-1][2]}:00" if points else None,
+			trips=[{k: t[k] for k in ("start", "end", "minutes", "distance_km", "avg_speed", "max_speed")} for t in route["trips"]],
+			stops=[{k: st[k] for k in ("start", "end", "minutes", "ongoing", "lat", "lon")} for st in route["stops"]],
 		)
 	return {
 		"employee": emp.name,

@@ -168,6 +168,7 @@ def set_default_settings():
 		"alarm_interval": 30,
 		"keep_days": 90,
 		"alert_repeat_minutes": 30,
+		"stop_minutes": 5,
 	}
 	for key, value in defaults.items():
 		if not s.get(key):

@@ -109,10 +109,11 @@ function ht_form_route(frm, d) {
 			frm.__ht_route_on = true;
 			let sum = wrap.find(".ht-rsum");
 			if (!sum.length) {
-				sum = $('<div class="ht-rsum" style="margin-top:8px;font-size:13px;display:flex;gap:12px;align-items:center"></div>');
+				sum = $('<div class="ht-rsum" style="margin-top:8px;font-size:13px"></div>');
 				wrap.append(sum);
 			}
-			sum.html("<span>" + H.routeSummary(data) + '</span><a href="javascript:void(0)" class="ht-rclear">Hide route</a>');
+			sum.html('<div style="display:flex;gap:12px;align-items:center"><span>' + H.routeSummary(data) +
+				'</span><a href="javascript:void(0)" class="ht-rclear">Hide route</a></div>' + H.routeTable(data));
 			sum.find(".ht-rclear").on("click", () => {
 				el.__htmap.removeLayer(el.__htroute);
 				el.__htroute = null;

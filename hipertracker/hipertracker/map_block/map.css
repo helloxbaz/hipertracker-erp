@@ -49,6 +49,14 @@
 .ht-panel .ht-btns { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .ht-panel .ht-route { margin-top:14px; padding-top:12px; border-top:1px solid var(--border-color, #e5e7eb); font-size:13px; }
 .ht-panel .ht-route .ht-btns { margin:8px 0 6px; }
+.ht-rlist { margin-top:10px; display:flex; flex-direction:column; gap:6px; }
+.ht-ri { display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border-radius:10px; background: var(--subtle-fg, #f9fafb); cursor:pointer; font-size:13px; }
+.ht-ri:hover { background: color-mix(in srgb, var(--ht-blue) 10%, var(--card-bg, #fff)); }
+.ht-ri-ico { flex:none; width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:#fff; }
+.ht-ri-trip { background: var(--ht-blue); }
+.ht-ri-stop { background:#7c3aed; }
+.ht-stop { position:absolute; left:-10px; top:-10px; width:20px; height:20px; border-radius:50%; background:#7c3aed; color:#fff; border:2px solid #fff;
+  font:700 11px/16px sans-serif; text-align:center; box-shadow:0 1px 4px rgba(0,0,0,.35); }
 .ht-badge { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:500; }
 .ht-badge::before { content:""; width:7px; height:7px; border-radius:50%; background: currentColor; }
 .ht-b-online { color:var(--ht-green); background: color-mix(in srgb, var(--ht-green) 12%, transparent); }

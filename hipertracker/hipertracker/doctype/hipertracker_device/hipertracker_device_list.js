@@ -1,6 +1,7 @@
 // Generated from map_block/htmini.js + map_block/device_list.src.js - edit those and rebuild.
 // Shared helpers for the HiperTracker Device form and list maps (kept in sync in both scripts).
-window.htmini = window.htmini || (function () {
+// versioned: a newer copy (from either script) replaces an older one already on the page
+window.htmini = window.htmini && window.htmini.v >= 2 ? window.htmini : (function () {
 	const COLORS = { online: "#16a34a", offline: "#dc2626", gps_off: "#d97706", off_duty: "#9ca3af", unknown: "#6b7280" };
 	const LABELS = { online: "Online", offline: "Offline", gps_off: "GPS Off", off_duty: "Off duty", unknown: "No data" };
 	const esc = (s) => frappe.utils.escape_html(s == null ? "" : String(s));
@@ -107,22 +108,46 @@ window.htmini = window.htmini || (function () {
 			if (e.lat == null || e.event === "GPS On") return;
 			dot([e.lat, e.lon], COLORS.gps_off, e.event + " " + String(e.time).slice(11, 16), true);
 		});
+		// stops: purple P markers
+		(data.stops || []).forEach((st) => {
+			L.circleMarker([st.lat, st.lon], { radius: 10, color: "#fff", weight: 2, fillColor: "#7c3aed", fillOpacity: 1 })
+				.bindTooltip("Stopped " + mins(st.minutes) + " (" + st.start + " – " + (st.ongoing ? "now" : st.end) + ")")
+				.addTo(g);
+		});
 		const all = pts.concat(extra);
 		if (all.length > 1) map.fitBounds(all, { padding: [40, 40], maxZoom: 16 });
 		else if (all.length) map.setView(all[0], 15);
 		return g;
 	}
 
+	const mins = (m) => (m >= 60 ? Math.floor(m / 60) + "h " + String(m % 60).padStart(2, "0") + "m" : m + " min");
+
 	function routeSummary(data) {
 		const n = (data.points || []).length;
 		if (!n) return "No route recorded on " + esc(frappe.datetime.str_to_user(data.date)) + ".";
 		const off = (data.events || []).filter((e) => e.event === "GPS Off").length;
-		return "<b>" + esc(frappe.datetime.str_to_user(data.date)) + "</b>: " + data.distance_km + " km, " + n + " points, " +
-			data.points[0][2] + " – " + data.points[n - 1][2] +
+		return "<b>" + esc(frappe.datetime.str_to_user(data.date)) + "</b>: " + data.distance_km + " km, " +
+			(data.trips || []).length + " trip(s), " + (data.stops || []).length + " stop(s) · moving " +
+			mins(data.moving_minutes || 0) + ", stopped " + mins(data.stopped_minutes || 0) +
 			(off ? ' · <b style="color:' + COLORS.gps_off + '">GPS switched off ' + off + " time(s)</b>" : "");
 	}
 
-	return { COLORS, LABELS, esc, ago, place, badge, leaflet, makeMap, marker, update, drawRoute, routeSummary };
+	// trips and stops in time order, as a small table under the map
+	function routeTable(data) {
+		const rows = [];
+		(data.trips || []).forEach((t) => rows.push([t.start,
+			'<span style="color:#2563eb">&#10148; Trip</span>', t.start + " – " + t.end,
+			t.distance_km + " km · " + mins(t.minutes) + " · avg " + t.avg_speed + " / max " + t.max_speed + " km/h"]));
+		(data.stops || []).forEach((st) => rows.push([st.start,
+			'<span style="color:#7c3aed">&#9208; Stop</span>', st.start + " – " + (st.ongoing ? "now" : st.end),
+			mins(st.minutes) + ' · <a target="_blank" rel="noopener" href="https://www.google.com/maps?q=' + st.lat + "," + st.lon + '">map</a>']));
+		if (!rows.length) return "";
+		rows.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+		return '<table class="table table-sm" style="margin-top:8px;font-size:13px"><tbody>' +
+			rows.map((r) => "<tr><td>" + r[1] + "</td><td>" + r[2] + "</td><td>" + r[3] + "</td></tr>").join("") + "</tbody></table>";
+	}
+
+	return { v: 2, COLORS, LABELS, esc, ago, place, badge, leaflet, makeMap, marker, update, drawRoute, routeSummary, routeTable };
 })();
 
 // HiperTracker Device list: live map of all devices above the list.

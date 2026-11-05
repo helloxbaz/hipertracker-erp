@@ -6,7 +6,7 @@
   const COLORS = { online: '#16a34a', offline: '#dc2626', gps_off: '#d97706', off_duty: '#9ca3af', unknown: '#6b7280' };
   const LABELS = { online: 'Online', offline: 'Offline', gps_off: 'GPS Off', off_duty: 'Off duty', unknown: 'No data' };
 
-  let state = { data: null, map: null, markers: {}, selected: null, fitted: false, base: null, sat: null, route: null, routeDate: null, routeSum: '' };
+  let state = { data: null, map: null, markers: {}, selected: null, fitted: false, base: null, sat: null, route: null, routeDate: null, routeSum: '', routeData: null, focus: null };
 
   // stop any timer left from an earlier render of this block
   if (window.__hipertrackerTimer) { clearInterval(window.__hipertrackerTimer); window.__hipertrackerTimer = null; }
@@ -194,7 +194,7 @@
       '<input type="date" class="form-control input-sm" data-el="rdate" value="' + esc(state.routeDate) + '" style="width:150px">' +
       '<button class="btn btn-default btn-sm" data-act="route">Show route</button>' +
       (state.route ? '<button class="btn btn-default btn-sm" data-act="unroute">Hide</button>' : '') + '</div>' +
-      '<div class="ht-muted" data-el="rsum">' + (state.routeSum || '') + '</div></div>';
+      '<div class="ht-muted" data-el="rsum">' + (state.routeSum || '') + '</div>' + routeList() + '</div>';
     p.style.display = '';
   }
 
@@ -217,9 +217,45 @@
   }
 
   // ---- route history (positions stored in ERP) ----
+  const mins = (m) => (m >= 60 ? Math.floor(m / 60) + 'h ' + String(m % 60).padStart(2, '0') + 'm' : m + ' min');
+
   function clearRoute() {
     if (state.route) { state.map.removeLayer(state.route); state.route = null; }
+    if (state.focus) { state.map.removeLayer(state.focus); state.focus = null; }
     state.routeSum = '';
+    state.routeData = null;
+  }
+
+  // trips and stops of the shown day, in time order
+  function routeList() {
+    const r = state.routeData;
+    if (!r || !((r.trips || []).length || (r.stops || []).length)) return '';
+    const items = [];
+    (r.trips || []).forEach((t, i) => items.push({ at: t.start, html:
+      '<div class="ht-ri" data-trip="' + i + '"><span class="ht-ri-ico ht-ri-trip">&#10148;</span><div><b>' + t.start + ' – ' + t.end + '</b> · ' +
+      t.distance_km + ' km<div class="ht-sub">' + mins(t.minutes) + ' · avg ' + t.avg_speed + ' km/h · max ' + t.max_speed + ' km/h</div></div></div>' }));
+    (r.stops || []).forEach((st, i) => items.push({ at: st.start, html:
+      '<div class="ht-ri" data-stop="' + i + '"><span class="ht-ri-ico ht-ri-stop">P</span><div><b>' + st.start + ' – ' + (st.ongoing ? 'now' : st.end) + '</b> · stopped ' +
+      mins(st.minutes) + '<div class="ht-sub">' + Number(st.lat).toFixed(5) + ', ' + Number(st.lon).toFixed(5) + '</div></div></div>' }));
+    items.sort((a, b) => (a.at < b.at ? -1 : 1));
+    return '<div class="ht-rlist">' + items.map((x) => x.html).join('') + '</div>';
+  }
+
+  // highlight one trip (its part of the line) or one stop
+  function focusItem(kind, i) {
+    const r = state.routeData, L = window.L;
+    if (!r) return;
+    if (state.focus) { state.map.removeLayer(state.focus); state.focus = null; }
+    if (kind === 'trip') {
+      const t = r.trips[i];
+      const seg = r.points.slice(t.s, t.e + 1).map((p) => [p[0], p[1]]);
+      state.focus = L.polyline(seg, { color: '#f59e0b', weight: 7, opacity: 0.9 }).addTo(state.map);
+      state.map.fitBounds(seg, { padding: [60, 60], maxZoom: 16 });
+    } else {
+      const st = r.stops[i];
+      state.focus = L.circle([st.lat, st.lon], { radius: 150, color: '#7c3aed', weight: 2, fillOpacity: 0.12 }).addTo(state.map);
+      state.map.setView([st.lat, st.lon], 16);
+    }
   }
 
   function showRoute() {
@@ -251,14 +287,20 @@
         if (e.lat == null || e.event === 'GPS On') return;
         dot([e.lat, e.lon], COLORS.gps_off, e.event + ' ' + String(e.time).slice(11, 16), true);
       });
+      (data.stops || []).forEach((st) => {
+        L.marker([st.lat, st.lon], { icon: L.divIcon({ className: 'ht-icon', html: '<span class="ht-stop">P</span>', iconSize: [0, 0] }) })
+          .bindTooltip('Stopped ' + mins(st.minutes) + ' (' + st.start + ' – ' + (st.ongoing ? 'now' : st.end) + ')').addTo(g);
+      });
       state.route = g;
+      state.routeData = data;
       const all = pts.concat(extra);
       if (all.length > 1) state.map.fitBounds(all, { padding: [50, 50], maxZoom: 16 });
       else if (all.length) state.map.setView(all[0], 15);
       const n = pts.length;
       const off = (data.events || []).filter((e) => e.event === 'GPS Off').length;
       state.routeSum = n
-        ? esc(frappe.datetime.str_to_user(data.date)) + ': <b>' + data.distance_km + ' km</b>, ' + data.points[0][2] + ' – ' + data.points[n - 1][2] +
+        ? esc(frappe.datetime.str_to_user(data.date)) + ': <b>' + data.distance_km + ' km</b>, ' + (data.trips || []).length + ' trip(s), ' +
+          (data.stops || []).length + ' stop(s)<br>Moving ' + mins(data.moving_minutes || 0) + ' · stopped ' + mins(data.stopped_minutes || 0) +
           (off ? ' · <b style="color:' + COLORS.gps_off + '">GPS off ' + off + '×</b>' : '')
         : 'No route recorded on ' + esc(frappe.datetime.str_to_user(data.date)) + '.';
       renderPanel();
@@ -289,8 +331,10 @@
   // ---- events ----
   R.addEventListener('click', (e) => {
     if (e.target.matches && e.target.matches('input')) return;
-    const t = e.target.closest('[data-act],[data-layer],[data-record],[data-focus],tr.ht-row');
+    const t = e.target.closest('[data-act],[data-layer],[data-record],[data-focus],[data-trip],[data-stop],tr.ht-row');
     if (!t) return;
+    if (t.dataset.trip) return focusItem('trip', Number(t.dataset.trip));
+    if (t.dataset.stop) return focusItem('stop', Number(t.dataset.stop));
     if (t.dataset.act === 'refresh') return load(false);
     if (t.dataset.act === 'route') return showRoute();
     if (t.dataset.act === 'unroute') { clearRoute(); return renderPanel(); }

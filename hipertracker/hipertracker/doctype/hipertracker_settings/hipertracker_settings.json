@@ -40,7 +40,9 @@
   "alert_repeat_minutes",
   "phone_link_column",
   "auto_add_devices",
-  "require_device_key"
+  "require_device_key",
+  "trips_section",
+  "stop_minutes"
  ],
  "fields": [
   {
@@ -271,6 +273,18 @@
    "label": "Require device key",
    "default": "0",
    "description": "Off: phones only need the server address (e.g. https://nexus365.hipersignerp.cloud) and their ID, like Traccar. On: only phones set up by ERP login or setup QR (which carry the device's key) are accepted."
+  },
+  {
+   "fieldname": "trips_section",
+   "fieldtype": "Section Break",
+   "label": "Trips & Stops"
+  },
+  {
+   "fieldname": "stop_minutes",
+   "fieldtype": "Int",
+   "label": "Stop After (minutes)",
+   "default": "5",
+   "description": "Staying within about 150 m for this long counts as a stop (or idle time). The movement between two stops is a trip."
   }
  ],
  "index_web_pages_for_search": 0,
