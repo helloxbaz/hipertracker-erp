@@ -692,3 +692,105 @@ def my_day(days=14):
 		"logs": [{"log_type": l.log_type, "time": str(l.time), "lat": l.latitude, "lon": l.longitude} for l in logs],
 		"today": summary,
 	}
+
+
+# ---------------------------------------------------------------------------------------------
+# Delivery Trip: planned stops vs the route actually taken
+# ---------------------------------------------------------------------------------------------
+
+
+@frappe.whitelist()
+def delivery_trip(trip):
+	"""Planned stops (the stop's lat/lng, else a Customer Site place for that customer) against the route the
+	vehicle's phone (or the driver's) took since departure, with when each stop was reached and left."""
+	if not frappe.get_list("Delivery Trip", filters={"name": trip}, pluck="name"):
+		frappe.throw("You do not have access to this Delivery Trip.", frappe.PermissionError)
+	doc = frappe.get_doc("Delivery Trip", trip)
+
+	dev, how = None, ""
+	if doc.vehicle:
+		dev = frappe.db.get_value("HiperTracker Device", {"vehicle": doc.vehicle, "active": 1}, "name")
+		how = f"vehicle {doc.vehicle}"
+	emp = (frappe.db.get_value("Driver", doc.driver, "employee") if doc.driver else None) or doc.employee
+	if not dev and emp:
+		dev = frappe.db.get_value("HiperTracker Device", {"employee": emp, "active": 1}, "name")
+		how = "driver's phone"
+
+	now = now_datetime()
+	start = get_datetime(doc.departure_time) if doc.departure_time else get_datetime(f"{today()} 00:00:00")
+	end = min(add_to_date(start, hours=24), now)
+	pts = []
+	if dev and start <= now:
+		for r in frappe.get_all(
+			"HiperTracker Position",
+			filters=[["device", "=", dev], ["device_time", ">=", start], ["device_time", "<=", end], ["event", "=", "Location"]],
+			fields=["device_time", "latitude", "longitude", "accuracy", "speed"], order_by="device_time asc", limit_page_length=20000,
+		):
+			if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > 200):
+				continue
+			pts.append([round(flt(r.latitude), 6), round(flt(r.longitude), 6), get_datetime(r.device_time), flt(r.speed)])
+	actual_km = sum(_km(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]) for i in range(1, len(pts)))
+
+	stops = []
+	for s in doc.delivery_stops:
+		lat, lon, radius, source = flt(s.lat), flt(s.lng), 150, "stop"
+		if not (lat and lon):
+			lat = lon = None
+			source = ""
+			g = frappe.get_all("HiperTracker Geofence", filters={"customer": s.customer, "active": 1},
+							   fields=["name", "latitude", "longitude", "radius"], limit_page_length=1) if s.customer else []
+			if g:
+				lat, lon, radius, source = flt(g[0].latitude), flt(g[0].longitude), cint(g[0].radius) or 150, f"place {g[0].name}"
+		addr = (s.customer_address or "").replace("<br>", "\n").replace(",", "\n")
+		stops.append({
+			"idx": s.idx, "customer": s.customer, "address": ", ".join(x.strip() for x in addr.split("\n") if x.strip()),
+			"delivery_note": s.delivery_note, "visited": s.visited, "lat": lat, "lon": lon, "radius": radius, "source": source,
+			"eta": str(s.estimated_arrival)[11:16] if s.estimated_arrival else None,
+			"arrived": None, "left": None, "minutes": None, "status": "No location" if lat is None else "Pending",
+		})
+
+	arrived_at = {}
+	for st in stops:
+		if st["lat"] is None:
+			continue
+		near = lambda p, extra=0: _km(p[0], p[1], st["lat"], st["lon"]) * 1000 <= st["radius"] + extra  # noqa: E731
+		i = next((k for k, p in enumerate(pts) if near(p)), None)
+		if i is None:
+			continue
+		j = i
+		while j + 1 < len(pts) and near(pts[j + 1], 50):
+			j += 1
+		arrived_at[st["idx"]] = pts[i][2]
+		st["arrived"] = str(pts[i][2])[11:16]
+		if j + 1 < len(pts):
+			st.update(left=str(pts[j][2])[11:16], minutes=int((pts[j][2] - pts[i][2]).total_seconds() // 60), status="Visited")
+		else:
+			st["status"] = "At stop"
+	# visited out of the planned order?
+	planned = [st["idx"] for st in stops if st["idx"] in arrived_at]
+	for k, idx in enumerate(sorted(arrived_at, key=arrived_at.get)):
+		st = next(x for x in stops if x["idx"] == idx)
+		st["order"] = k + 1
+		if planned[k] != idx:
+			st["out_of_order"] = 1
+
+	planned_km, prev = 0.0, (pts[0][:2] if pts else None)
+	for st in stops:
+		if st["lat"] is None:
+			continue
+		if prev:
+			planned_km += _km(prev[0], prev[1], st["lat"], st["lon"])
+		prev = [st["lat"], st["lon"]]
+
+	last = None
+	if pts:
+		last = {"lat": pts[-1][0], "lon": pts[-1][1], "time": str(pts[-1][2]), "speed": pts[-1][3],
+				"age_minutes": round((now - pts[-1][2]).total_seconds() / 60.0, 1)}
+	return {
+		"trip": doc.name, "status": doc.status, "device": dev, "matched_by": how, "start": str(start), "end": str(end),
+		"points": [[p[0], p[1], str(p[2])[11:16], p[3]] for p in pts], "stops": stops, "last": last,
+		"planned_km": round(planned_km * 1.25, 1),  # roads are ~25 % longer than straight lines
+		"actual_km": round(actual_km, 1),
+		"visited": len([s for s in stops if s["status"] in ("Visited", "At stop")]),
+		"located": len([s for s in stops if s["lat"] is not None]),
+	}
