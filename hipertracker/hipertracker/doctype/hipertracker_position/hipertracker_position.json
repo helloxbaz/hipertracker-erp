@@ -152,7 +152,7 @@
    "fieldtype": "Check",
    "in_list_view": 0,
    "in_standard_filter": 1,
-   "label": "Over Speed",
+   "label": "Over Speed Limit",
    "read_only": 1
   }
  ],

@@ -107,10 +107,22 @@ def live(sync=0):
 		# keep the list view's Status column right as phones go quiet
 		if is_manager and STATUS_LABELS[status] != l.last_status:
 			frappe.db.set_value("HiperTracker Device", l.name, "last_status", STATUS_LABELS[status], update_modified=False)
+	# places (geofences) for the map, and which place each device is in right now
+	geofences = [
+		{"name": f.name, "lat": f.latitude, "lon": f.longitude, "radius": f.radius or 200,
+		 "color": f.color or "#0ea5e9", "type": f.place_type}
+		for f in frappe.get_all("HiperTracker Geofence", filters={"active": 1},
+								fields=["name", "latitude", "longitude", "radius", "color", "place_type"], limit_page_length=500)
+	]
+	inside = {v.device: {"name": v.geofence, "since": str(v.entered_at)[11:16]}
+			  for v in frappe.get_all("HiperTracker Geofence Visit", filters={"inside": 1},
+									  fields=["device", "geofence", "entered_at"], limit_page_length=5000)}
+	for r in out:
+		r["place"] = inside.get(r["record"])
 	return {
 		"settings": settings, "is_manager": 1 if is_manager else 0,
 		"devices": sorted(out, key=lambda r: (STATUS_RANK.get(r["status"], 4), (r["label"] or "").lower())),
-		"not_in_traccar": no_data, "unmapped_count": 0, "created": 0, "error": None,
+		"not_in_traccar": no_data, "geofences": geofences, "unmapped_count": 0, "created": 0, "error": None,
 	}
 
 
@@ -372,7 +384,43 @@ def position(**a):
 		for u in _head_users(dev):
 			_bell(u, dev.name, f"GPS back on: {who}")
 		frappe.db.set_value("HiperTracker Device", dev.name, "last_alert_type", "", update_modified=False)
+	if newest and lat is not None and (acc is None or acc <= 100):
+		_geofences(dev, lat, lon, when, who)
 	return {"ok": 1, "msg": None}
+
+
+def _geofences(dev, lat, lon, when, who):
+	"""Record entering / leaving places (HiperTracker Geofence) and alert the head if the place asks for it."""
+	fences = frappe.get_all("HiperTracker Geofence", filters={"active": 1},
+							fields=["name", "latitude", "longitude", "radius", "alert_on"], limit_page_length=500)
+	if not fences:
+		return
+	inside = {v.geofence: v for v in frappe.get_all("HiperTracker Geofence Visit", filters={"device": dev.name, "inside": 1},
+													fields=["name", "geofence", "entered_at"])}
+	for f in fences:
+		d = _km(lat, lon, flt(f.latitude), flt(f.longitude)) * 1000
+		r = cint(f.radius) or 200
+		kind = None
+		if f.name not in inside and d <= r:
+			frappe.get_doc({"doctype": "HiperTracker Geofence Visit", "geofence": f.name, "device": dev.name,
+							"device_label": dev.device_label, "employee": dev.employee, "entered_at": when,
+							"inside": 1}).insert(ignore_permissions=True)
+			kind = "Enter"
+		elif f.name in inside and d > r + 50:  # 50 m margin so GPS wobble at the edge isn't many visits
+			v = inside[f.name]
+			frappe.db.set_value("HiperTracker Geofence Visit", v.name, {
+				"exited_at": when, "inside": 0,
+				"minutes": int(max(time_diff_in_seconds(when, v.entered_at), 0) // 60)}, update_modified=False)
+			kind = "Exit"
+		if kind and kind in (f.alert_on or ""):
+			subject = f"{who} {'arrived at' if kind == 'Enter' else 'left'} {f.name}"
+			body = (f"<p><b>{subject}</b> at {format_datetime(when)}.</p>"
+					f'<p><a href="{get_url_to_form("HiperTracker Device", dev.name)}">Open in HiperTracker</a></p>')
+			for u in _head_users(dev):
+				_bell(u, dev.name, subject, body)
+				email = frappe.db.get_value("User", u, "email")
+				if email:
+					frappe.sendmail(recipients=[email], subject=subject, message=body)
 
 
 def _head_users(dev):

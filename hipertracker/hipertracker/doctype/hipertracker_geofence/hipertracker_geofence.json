@@ -1,0 +1,164 @@
+{
+ "actions": [],
+ "creation": "2026-11-05 18:30:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "geofence_name",
+  "place_type",
+  "customer",
+  "active",
+  "column_a",
+  "alert_on",
+  "color",
+  "area_section",
+  "map_html",
+  "latitude",
+  "longitude",
+  "column_b",
+  "radius",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "geofence_name",
+   "fieldtype": "Data",
+   "label": "Place Name",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1,
+   "description": "e.g. Head Office, Warehouse, a customer site"
+  },
+  {
+   "fieldname": "place_type",
+   "fieldtype": "Select",
+   "label": "Type",
+   "options": "Office\nCustomer Site\nWarehouse\nSite\nRestricted Area\nOther",
+   "default": "Site",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer",
+   "depends_on": "eval:doc.place_type=='Customer Site'"
+  },
+  {
+   "fieldname": "active",
+   "fieldtype": "Check",
+   "label": "Active",
+   "default": "1",
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "column_a",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "alert_on",
+   "fieldtype": "Select",
+   "label": "Alert Head On",
+   "options": "Nothing\nEnter\nExit\nEnter and Exit",
+   "default": "Nothing",
+   "in_list_view": 1,
+   "description": "Visits are always recorded; this only decides when the head is notified."
+  },
+  {
+   "fieldname": "color",
+   "fieldtype": "Color",
+   "label": "Colour on Map",
+   "default": "#0ea5e9"
+  },
+  {
+   "fieldname": "area_section",
+   "fieldtype": "Section Break",
+   "label": "Area",
+   "description": "Click on the map to put the centre, then set the radius."
+  },
+  {
+   "fieldname": "map_html",
+   "fieldtype": "HTML",
+   "label": "Map"
+  },
+  {
+   "fieldname": "latitude",
+   "fieldtype": "Float",
+   "label": "Latitude",
+   "precision": "7",
+   "reqd": 1
+  },
+  {
+   "fieldname": "longitude",
+   "fieldtype": "Float",
+   "label": "Longitude",
+   "precision": "7",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_b",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "radius",
+   "fieldtype": "Int",
+   "label": "Radius (m)",
+   "default": "200",
+   "reqd": 1,
+   "non_negative": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-05 18:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "HiperTracker",
+ "name": "HiperTracker Geofence",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "share": 1,
+   "email": 1
+  },
+  {
+   "role": "HiperTracker Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "share": 1,
+   "email": 1
+  },
+  {
+   "role": "HiperTracker User",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  }
+ ],
+ "states": [],
+ "autoname": "field:geofence_name",
+ "naming_rule": "By fieldname",
+ "title_field": "geofence_name",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

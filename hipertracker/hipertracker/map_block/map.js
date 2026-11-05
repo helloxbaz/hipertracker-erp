@@ -59,6 +59,19 @@
     setTimeout(() => map.invalidateSize(), 300);
   }
 
+  // places (geofences): light circles with the name on hover
+  function renderFences() {
+    const L = window.L;
+    if (state.fences) state.map.removeLayer(state.fences);
+    state.fences = L.layerGroup().addTo(state.map);
+    ((state.data && state.data.geofences) || []).forEach((f) => {
+      if (f.lat == null || f.lon == null) return;
+      L.circle([f.lat, f.lon], { radius: f.radius, color: f.color, weight: 1.5, fillOpacity: 0.08, interactive: true })
+        .bindTooltip(esc(f.name) + (f.type ? ' <span style="opacity:.7">(' + esc(f.type) + ')</span>' : ''), { sticky: true })
+        .addTo(state.fences);
+    });
+  }
+
   // a person / vehicle is just a coloured dot; name and speed show on hover or tap
   function dotHtml(d, selected) {
     const color = COLORS[d.status] || COLORS.unknown;
@@ -171,6 +184,7 @@
     add('Phone', d.phone ? '<a href="tel:' + esc(d.phone) + '">' + esc(d.phone) + '</a>' : '');
     add('Speed', (d.speed || 0) + ' km/h');
     add('Location', esc(place(d)));
+    if (d.place) add('At place', '<b>' + esc(d.place.name) + '</b> <span class="ht-muted">since ' + esc(d.place.since) + '</span>');
     add('Last update', esc(d.last_update ? frappe.datetime.str_to_user(d.last_update) : '—') + ' <span class="ht-muted">(' + ago(d.age_minutes) + ')</span>');
     if (d.status === 'gps_off') add('GPS', '<b style="color:' + COLORS.gps_off + '">Switched off on the phone</b>' +
       (d.gps_off_since ? ' <span class="ht-muted">since ' + esc(frappe.datetime.str_to_user(d.gps_off_since)) + '</span>' : ''));
@@ -334,7 +348,7 @@
         if (gps.length) msgs.push('<b>GPS switched off:</b> ' + gps.map((d) => esc(d.label) + (d.employee_name ? ' (' + esc(d.employee_name) + ')' : '')).join(', '));
         showAlert(msgs.join('<br>'), false);
       }
-      renderKpis(); renderMarkers(); renderTable(); renderPanel();
+      renderKpis(); renderFences(); renderMarkers(); renderTable(); renderPanel();
       el('updated').textContent = 'Updated ' + frappe.datetime.now_time().slice(0, 5);
       return data;
     });

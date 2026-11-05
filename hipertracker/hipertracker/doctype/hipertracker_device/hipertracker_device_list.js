@@ -1,7 +1,7 @@
 // Generated from map_block/htmini.js + map_block/device_list.src.js - edit those and rebuild.
 // Shared helpers for the HiperTracker Device form and list maps (kept in sync in both scripts).
 // versioned: a newer copy (from either script) replaces an older one already on the page
-window.htmini = window.htmini && window.htmini.v >= 2 ? window.htmini : (function () {
+window.htmini = window.htmini && window.htmini.v >= 3 ? window.htmini : (function () {
 	const COLORS = { online: "#16a34a", offline: "#dc2626", gps_off: "#d97706", off_duty: "#9ca3af", unknown: "#6b7280" };
 	const LABELS = { online: "Online", offline: "Offline", gps_off: "GPS Off", off_duty: "Off duty", unknown: "No data" };
 	const esc = (s) => frappe.utils.escape_html(s == null ? "" : String(s));

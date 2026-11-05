@@ -107,6 +107,10 @@ def make_sidebar():
 		 "icon": "smartphone"},
 		{"label": "Location History", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Position",
 		 "icon": "list"},
+		{"label": "Places (Geofences)", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Geofence",
+		 "icon": "map-pin"},
+		{"label": "Place Visits", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Geofence Visit",
+		 "icon": "clock"},
 		{"label": "Settings", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Settings",
 		 "icon": "settings"},
 	]
