@@ -1,0 +1,144 @@
+{
+ "actions": [],
+ "creation": "2026-11-05 19:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "place",
+  "stop_name",
+  "planned_time",
+  "task",
+  "column_a",
+  "latitude",
+  "longitude",
+  "radius",
+  "progress_section",
+  "status",
+  "arrived_at",
+  "column_b",
+  "left_at",
+  "minutes",
+  "out_of_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "place",
+   "fieldtype": "Link",
+   "label": "Place",
+   "options": "HiperTracker Geofence",
+   "in_list_view": 1,
+   "columns": 2,
+   "description": "A saved place, or leave empty and set the location yourself"
+  },
+  {
+   "fieldname": "stop_name",
+   "fieldtype": "Data",
+   "label": "Stop",
+   "in_list_view": 1,
+   "columns": 2,
+   "fetch_from": "place.geofence_name",
+   "fetch_if_empty": 1
+  },
+  {
+   "fieldname": "planned_time",
+   "fieldtype": "Time",
+   "label": "Planned Time",
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "task",
+   "fieldtype": "Small Text",
+   "label": "What to do"
+  },
+  {
+   "fieldname": "column_a",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "latitude",
+   "fieldtype": "Float",
+   "label": "Latitude",
+   "precision": "7",
+   "fetch_from": "place.latitude",
+   "fetch_if_empty": 1
+  },
+  {
+   "fieldname": "longitude",
+   "fieldtype": "Float",
+   "label": "Longitude",
+   "precision": "7",
+   "fetch_from": "place.longitude",
+   "fetch_if_empty": 1
+  },
+  {
+   "fieldname": "radius",
+   "fieldtype": "Int",
+   "label": "Radius (m)",
+   "default": "150",
+   "fetch_from": "place.radius",
+   "fetch_if_empty": 1
+  },
+  {
+   "fieldname": "progress_section",
+   "fieldtype": "Section Break",
+   "label": "Progress"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Pending\nReached\nLeft\nSkipped",
+   "default": "Pending",
+   "in_list_view": 1,
+   "columns": 1,
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "arrived_at",
+   "fieldtype": "Datetime",
+   "label": "Reached At",
+   "in_list_view": 1,
+   "columns": 2,
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "column_b",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "left_at",
+   "fieldtype": "Datetime",
+   "label": "Left At",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "minutes",
+   "fieldtype": "Int",
+   "label": "Minutes There",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "out_of_order",
+   "fieldtype": "Check",
+   "label": "Out of Order",
+   "read_only": 1,
+   "no_copy": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-05 19:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "HiperTracker",
+ "name": "HiperTracker Trip Stop",
+ "owner": "Administrator",
+ "permissions": [],
+ "states": [],
+ "istable": 1,
+ "editable_grid": 1
+}

@@ -18,7 +18,7 @@ ATTENDANCE_BLOCK = "HiperTracker Attendance Today"
 LOGO = "/assets/hipertracker/images/hipertracker-logo.png"
 ROLES = ("HiperTracker User", "HiperTracker Manager")
 OUR_DOCTYPES = ("HiperTracker Settings", "HiperTracker Device", "HiperTracker Position", "HiperTracker Geofence",
-				"HiperTracker Geofence Visit")
+				"HiperTracker Geofence Visit", "HiperTracker Trip Plan", "HiperTracker Trip Stop")
 OUR_REPORTS = ("HiperTracker Daily Distance", "HiperTracker Trips", "HiperTracker Stops", "HiperTracker Speeding",
 			   "HiperTracker Place Visits")
 # made by hand on a site before this app existed; replaced by hipertracker.api.live
@@ -29,6 +29,7 @@ OLD_CLIENT_SCRIPTS = (
 	"HiperTracker Device - Phone Setup",
 	"HiperTracker Geofence - Map",
 	"HiperTracker Delivery Trip - Live Tracking",
+	"HiperTracker Trip Plan - Map",
 )
 OLD_EVENT_SCRIPT = "HiperTracker Device - Sync to Traccar"
 # made by hand on Nexus; replaced by hipertracker.api (mobile_config, checkin, position, history, scheduled jobs)
@@ -43,6 +44,8 @@ OLD_MOBILE_SCRIPTS = (
 	"HiperTracker My Day API",
 	"HiperTracker Delivery Trip API",
 	"HiperTracker Attendance Today API",
+	"HiperTracker Trip Plan API",
+	"HiperTracker Trip Plan - Before Save",
 )
 
 
@@ -121,6 +124,8 @@ def make_sidebar():
 		 "icon": "smartphone"},
 		{"label": "Location History", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Position",
 		 "icon": "list"},
+		{"label": "Trip Plans", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Trip Plan",
+		 "icon": "route"},
 		{"label": "Places (Geofences)", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Geofence",
 		 "icon": "map-pin"},
 		{"label": "Place Visits", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Geofence Visit",

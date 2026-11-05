@@ -1,0 +1,207 @@
+{
+ "actions": [],
+ "creation": "2026-11-05 19:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "employee",
+  "employee_name",
+  "device",
+  "column_a",
+  "date",
+  "status",
+  "progress",
+  "notify_head",
+  "stops_section",
+  "stops",
+  "map_section",
+  "map_html",
+  "started_at",
+  "finished_at",
+  "column_b",
+  "planned_km",
+  "actual_km",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "in_list_view": 1,
+   "description": "e.g. Kochi site visits"
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "label": "Employee Name",
+   "fetch_from": "employee.employee_name",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "device",
+   "fieldtype": "Link",
+   "label": "Phone",
+   "options": "HiperTracker Device",
+   "description": "Filled from the employee's phone when left empty"
+  },
+  {
+   "fieldname": "column_a",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Date",
+   "reqd": 1,
+   "default": "Today",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Planned\nIn Progress\nCompleted\nCancelled",
+   "default": "Planned",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "progress",
+   "fieldtype": "Data",
+   "label": "Stops Reached",
+   "read_only": 1,
+   "in_list_view": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "notify_head",
+   "fieldtype": "Check",
+   "label": "Tell the head as each stop is reached",
+   "default": "0"
+  },
+  {
+   "fieldname": "stops_section",
+   "fieldtype": "Section Break",
+   "label": "Stops (in order)"
+  },
+  {
+   "fieldname": "stops",
+   "fieldtype": "Table",
+   "label": "Stops",
+   "options": "HiperTracker Trip Stop",
+   "reqd": 1
+  },
+  {
+   "fieldname": "map_section",
+   "fieldtype": "Section Break",
+   "label": "Planned vs actual"
+  },
+  {
+   "fieldname": "map_html",
+   "fieldtype": "HTML",
+   "label": "Map"
+  },
+  {
+   "fieldname": "started_at",
+   "fieldtype": "Datetime",
+   "label": "Started",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "finished_at",
+   "fieldtype": "Datetime",
+   "label": "Finished",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "column_b",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "planned_km",
+   "fieldtype": "Float",
+   "label": "Planned (km, approx.)",
+   "precision": "1",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "actual_km",
+   "fieldtype": "Float",
+   "label": "Actual (km)",
+   "precision": "1",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-05 19:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "HiperTracker",
+ "name": "HiperTracker Trip Plan",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "share": 1,
+   "email": 1
+  },
+  {
+   "role": "HiperTracker Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "share": 1,
+   "email": 1
+  },
+  {
+   "role": "HiperTracker User",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1,
+   "write": 1,
+   "create": 1
+  }
+ ],
+ "states": [],
+ "autoname": "HTP-.YYYY.-.####",
+ "naming_rule": "Expression (old style)",
+ "title_field": "title",
+ "sort_field": "date",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "search_fields": "employee_name,title"
+}

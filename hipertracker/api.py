@@ -386,7 +386,51 @@ def position(**a):
 		frappe.db.set_value("HiperTracker Device", dev.name, "last_alert_type", "", update_modified=False)
 	if newest and lat is not None and (acc is None or acc <= 100):
 		_geofences(dev, lat, lon, when, who)
+		_trip_plans(dev, lat, lon, when, who)
 	return {"ok": 1, "msg": None}
+
+
+def _trip_plans(dev, lat, lon, when, who):
+	"""Mark the stops of today's Trip Plans reached / left as the phone gets there."""
+	plans = frappe.get_all("HiperTracker Trip Plan", fields=["name", "status", "notify_head"],
+						   filters={"device": dev.name, "date": getdate(when), "status": ["in", ["Planned", "In Progress", "Completed"]]})
+	for pl in plans:
+		stops = frappe.get_all("HiperTracker Trip Stop", filters={"parent": pl.name, "parenttype": "HiperTracker Trip Plan"},
+							   fields=["name", "idx", "stop_name", "latitude", "longitude", "radius", "status", "arrived_at"],
+							   order_by="idx asc")
+		changed, waiting = False, 0
+		for st in stops:
+			if st.status != "Skipped":
+				d = _km(lat, lon, flt(st.latitude), flt(st.longitude)) * 1000
+				r = cint(st.radius) or 150
+				if st.status == "Pending" and d <= r:
+					frappe.db.set_value("HiperTracker Trip Stop", st.name, {"status": "Reached", "arrived_at": when,
+										"out_of_order": 1 if waiting else 0}, update_modified=False)
+					st.status, changed = "Reached", True
+					if pl.notify_head:
+						subject = f"{who} reached {st.stop_name or f'stop {st.idx}'} (stop {st.idx} of {len(stops)})"
+						body = (f"<p><b>{subject}</b> at {format_datetime(when)}.</p>"
+								f'<p><a href="{get_url_to_form("HiperTracker Trip Plan", pl.name)}">Open the trip plan</a></p>')
+						for u in _head_users(dev):
+							_bell(u, dev.name, subject, body)
+							email = frappe.db.get_value("User", u, "email")
+							if email:
+								frappe.sendmail(recipients=[email], subject=subject, message=body)
+				elif st.status == "Reached" and d > r + 50:  # 50 m margin so GPS wobble at the edge isn't a leave
+					frappe.db.set_value("HiperTracker Trip Stop", st.name, {
+						"status": "Left", "left_at": when,
+						"minutes": int(max(time_diff_in_seconds(when, st.arrived_at), 0) // 60)}, update_modified=False)
+					st.status, changed = "Left", True
+			if st.status == "Pending":
+				waiting += 1
+		if changed:
+			done = len([x for x in stops if x.status != "Pending"])
+			upd = {"progress": f"{done} / {len(stops)}"}
+			if pl.status == "Planned":
+				upd.update(status="In Progress", started_at=when)
+			if done == len(stops) and pl.status != "Completed":
+				upd.update(status="Completed", finished_at=when)
+			frappe.db.set_value("HiperTracker Trip Plan", pl.name, upd)  # a form open on old data must reload
 
 
 def _geofences(dev, lat, lon, when, who):
@@ -685,7 +729,19 @@ def my_day(days=14):
 			trips=[{k: t[k] for k in ("start", "end", "minutes", "distance_km", "avg_speed", "max_speed")} for t in route["trips"]],
 			stops=[{k: st[k] for k in ("start", "end", "minutes", "ongoing", "lat", "lon")} for st in route["stops"]],
 		)
+	plans = []
+	for pl in frappe.get_all("HiperTracker Trip Plan", filters={"employee": emp.name, "date": today(), "status": ["!=", "Cancelled"]},
+							 fields=["name", "title", "status", "progress"], order_by="creation asc"):
+		stops = frappe.get_all("HiperTracker Trip Stop", filters={"parent": pl.name, "parenttype": "HiperTracker Trip Plan"},
+							   fields=["idx", "stop_name", "task", "latitude", "longitude", "planned_time", "status", "arrived_at", "left_at"],
+							   order_by="idx asc")
+		plans.append({**pl, "stops": [{
+			"idx": st.idx, "name": st.stop_name, "task": st.task, "lat": st.latitude, "lon": st.longitude,
+			"planned": str(st.planned_time).rjust(8, "0")[:5] if st.planned_time else None, "status": st.status,
+			"arrived": str(st.arrived_at)[11:16] if st.arrived_at else None,
+			"left": str(st.left_at)[11:16] if st.left_at else None} for st in stops]})
 	return {
+		"plans": plans,
 		"employee": emp.name,
 		"employee_name": emp.employee_name,
 		"device": device,
@@ -856,3 +912,87 @@ def attendance_today():
 	return {"date": str(day), "rows": rows, "total": len(rows), "in": count(lambda r: r["status"] == "In"),
 			"came": count(lambda r: r["first_in"]), "late": count(lambda r: r["late"]),
 			"not_in": count(lambda r: r["status"] == "Not in"), "leave": count(lambda r: r["status"] == "On leave")}
+
+
+# ---------------------------------------------------------------------------------------------
+# Trip Plan form: planned stops vs the route taken
+# ---------------------------------------------------------------------------------------------
+
+
+@frappe.whitelist()
+def trip_plan(plan, recalc=0):
+	"""The stops in order with when each was reached / left, the day's route, where the phone is now and the
+	distance so far. recalc=1 works reached / left out again from the day's history and saves it."""
+	if not frappe.get_list("HiperTracker Trip Plan", filters={"name": plan}, pluck="name"):
+		frappe.throw("You do not have access to this Trip Plan.", frappe.PermissionError)
+	doc = frappe.get_doc("HiperTracker Trip Plan", plan)
+	now = now_datetime()
+	pts = []
+	if doc.device:
+		for r in frappe.get_all(
+			"HiperTracker Position", order_by="device_time asc", limit_page_length=20000,
+			filters=[["device", "=", doc.device], ["event", "=", "Location"],
+					 ["device_time", ">=", f"{doc.date} 00:00:00"], ["device_time", "<=", f"{doc.date} 23:59:59"]],
+			fields=["device_time", "latitude", "longitude", "accuracy"],
+		):
+			if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > 100):
+				continue
+			pts.append([round(flt(r.latitude), 6), round(flt(r.longitude), 6), get_datetime(r.device_time)])
+	near = lambda p, st, extra=0: _km(p[0], p[1], flt(st.latitude), flt(st.longitude)) * 1000 <= (cint(st.radius) or 150) + extra  # noqa: E731
+
+	if cint(recalc):
+		for st in doc.stops:
+			if st.status == "Skipped":
+				continue
+			st.update({"status": "Pending", "arrived_at": None, "left_at": None, "minutes": 0, "out_of_order": 0})
+			i = next((k for k, p in enumerate(pts) if near(p, st)), None)
+			if i is None:
+				continue
+			j = i
+			while j + 1 < len(pts) and near(pts[j + 1], st, 50):
+				j += 1
+			st.update(status="Reached", arrived_at=pts[i][2])
+			if j + 1 < len(pts):
+				st.update(status="Left", left_at=pts[j + 1][2], minutes=int((pts[j + 1][2] - pts[i][2]).total_seconds() // 60))
+		for st in doc.stops:
+			if st.status in ("Reached", "Left"):
+				st.out_of_order = int(any(
+					o.idx < st.idx and (o.status == "Pending" or (o.arrived_at and o.arrived_at > st.arrived_at))
+					for o in doc.stops))
+		done = len([s for s in doc.stops if s.status != "Pending"])
+		reached = [s.arrived_at for s in doc.stops if s.arrived_at]
+		doc.status = "Planned" if not done else "Completed" if done == len(doc.stops) else "In Progress"
+		doc.started_at = min(reached) if reached else None
+		doc.finished_at = max(reached) if doc.status == "Completed" else None
+
+	start = get_datetime(doc.started_at) if doc.started_at else None
+	end = get_datetime(doc.finished_at) if doc.finished_at else None
+	actual = sum(_km(pts[k - 1][0], pts[k - 1][1], pts[k][0], pts[k][1]) for k in range(1, len(pts))
+				 if (not start or pts[k - 1][2] >= start) and (not end or pts[k][2] <= end))
+	if cint(recalc):
+		doc.actual_km = round(actual, 1)
+		doc.save(ignore_permissions=True)
+	elif abs(flt(doc.actual_km) - actual) >= 0.1:
+		# quietly, so a form someone has open doesn't become "modified"
+		doc.db_set("actual_km", round(actual, 1), update_modified=False)
+
+	stops = []
+	for st in doc.stops:
+		late = 0
+		if st.planned_time and st.arrived_at:
+			late = int(time_diff_in_seconds(st.arrived_at, get_datetime(f"{doc.date} {st.planned_time}")) // 60)
+		stops.append({
+			"idx": st.idx, "name": st.stop_name, "place": st.place, "task": st.task, "lat": flt(st.latitude),
+			"lon": flt(st.longitude), "radius": cint(st.radius) or 150, "status": st.status,
+			"planned": str(st.planned_time).rjust(8, "0")[:5] if st.planned_time else None,
+			"arrived": str(st.arrived_at)[11:16] if st.arrived_at else None,
+			"left": str(st.left_at)[11:16] if st.left_at else None, "minutes": st.minutes, "late": late,
+			"out_of_order": st.out_of_order,
+		})
+	last = None
+	if pts:
+		last = {"lat": pts[-1][0], "lon": pts[-1][1], "time": str(pts[-1][2]),
+				"age_minutes": round((now - pts[-1][2]).total_seconds() / 60.0, 1)}
+	return {"plan": doc.name, "status": doc.status, "device": doc.device, "progress": doc.progress,
+			"planned_km": doc.planned_km, "actual_km": doc.actual_km,
+			"points": [[p[0], p[1], str(p[2])[11:16]] for p in pts], "stops": stops, "last": last}
