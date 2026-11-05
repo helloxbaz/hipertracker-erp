@@ -30,6 +30,7 @@ override_whitelisted_methods = {
 	"hipertracker_checkin": "hipertracker.api.checkin",
 	"hipertracker_my_day": "hipertracker.api.my_day",
 	"hipertracker_delivery_trip": "hipertracker.api.delivery_trip",
+	"hipertracker_attendance_today": "hipertracker.api.attendance_today",
 }
 
 # planned vs actual on the Delivery Trip form

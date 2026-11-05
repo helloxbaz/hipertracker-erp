@@ -14,15 +14,21 @@ APP = "hipertracker"
 MODULE = "HiperTracker"
 WORKSPACE = "HiperTracker"
 BLOCK = "HiperTracker Live Map"
+ATTENDANCE_BLOCK = "HiperTracker Attendance Today"
 LOGO = "/assets/hipertracker/images/hipertracker-logo.png"
 ROLES = ("HiperTracker User", "HiperTracker Manager")
-OUR_DOCTYPES = ("HiperTracker Settings", "HiperTracker Device")
+OUR_DOCTYPES = ("HiperTracker Settings", "HiperTracker Device", "HiperTracker Position", "HiperTracker Geofence",
+				"HiperTracker Geofence Visit")
+OUR_REPORTS = ("HiperTracker Daily Distance", "HiperTracker Trips", "HiperTracker Stops", "HiperTracker Speeding",
+			   "HiperTracker Place Visits")
 # made by hand on a site before this app existed; replaced by hipertracker.api.live
 OLD_SERVER_SCRIPT = "HiperTracker Live API"
 OLD_CLIENT_SCRIPTS = (
 	"HiperTracker Device - Live Map",
 	"HiperTracker Device - List Map",
 	"HiperTracker Device - Phone Setup",
+	"HiperTracker Geofence - Map",
+	"HiperTracker Delivery Trip - Live Tracking",
 )
 OLD_EVENT_SCRIPT = "HiperTracker Device - Sync to Traccar"
 # made by hand on Nexus; replaced by hipertracker.api (mobile_config, checkin, position, history, scheduled jobs)
@@ -35,6 +41,8 @@ OLD_MOBILE_SCRIPTS = (
 	"HiperTracker Cleanup",
 	"HiperTracker Device - Key",
 	"HiperTracker My Day API",
+	"HiperTracker Delivery Trip API",
+	"HiperTracker Attendance Today API",
 )
 
 
@@ -45,6 +53,10 @@ def before_install():
 	for dt in OUR_DOCTYPES:
 		if frappe.db.exists("DocType", dt):
 			frappe.db.set_value("DocType", dt, {"custom": 0, "module": MODULE}, update_modified=False)
+	# reports first made by hand (not standard) make way for the app's own
+	for name in OUR_REPORTS:
+		if frappe.db.get_value("Report", name, "is_standard") == "No":
+			frappe.delete_doc("Report", name, force=True, ignore_permissions=True)
 	if frappe.db.exists("Workspace", WORKSPACE):
 		frappe.db.set_value("Workspace", WORKSPACE, "modified", "2000-01-01 00:00:00", update_modified=False)
 
@@ -74,23 +86,25 @@ def make_roles():
 			frappe.get_doc({"doctype": "Role", "role_name": role, "desk_access": 1}).insert(ignore_permissions=True)
 
 
-def _read(name):
-	path = os.path.join(os.path.dirname(__file__), "hipertracker", "map_block", name)
+def _read(name, folder="map_block"):
+	path = os.path.join(os.path.dirname(__file__), "hipertracker", folder, name)
 	with open(path, encoding="utf-8") as f:
 		return f.read()
 
 
 def make_map_block():
-	values = {
-		"html": _read("map.html"),
-		"script": _read("map.js"),
-		"style": _read("map.css"),
-	}
-	if frappe.db.exists("Custom HTML Block", BLOCK):
-		doc = frappe.get_doc("Custom HTML Block", BLOCK)
+	_block(BLOCK, {"html": _read("map.html"), "script": _read("map.js"), "style": _read("map.css")})
+	folder = "attendance_block"
+	_block(ATTENDANCE_BLOCK, {"html": _read("block.html", folder), "script": _read("block.js", folder),
+							  "style": _read("block.css", folder)})
+
+
+def _block(name, values):
+	if frappe.db.exists("Custom HTML Block", name):
+		doc = frappe.get_doc("Custom HTML Block", name)
 		doc.update(values)
 	else:
-		doc = frappe.get_doc({"doctype": "Custom HTML Block", "name": BLOCK, **values})
+		doc = frappe.get_doc({"doctype": "Custom HTML Block", "name": name, **values})
 	doc.set("roles", [{"role": r} for r in ("System Manager", *ROLES)])
 	doc.flags.ignore_permissions = True
 	doc.save() if not doc.is_new() else doc.insert()

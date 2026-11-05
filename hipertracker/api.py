@@ -794,3 +794,65 @@ def delivery_trip(trip):
 		"visited": len([s for s in stops if s["status"] in ("Visited", "At stop")]),
 		"located": len([s for s in stops if s["lat"] is not None]),
 	}
+
+
+# ---------------------------------------------------------------------------------------------
+# Attendance today (workspace block)
+# ---------------------------------------------------------------------------------------------
+
+
+@frappe.whitelist()
+def attendance_today():
+	"""Today's check ins of the people carrying a HiperTracker phone: first in, last out, late against
+	their shift (Shift Assignment, else the employee's default shift) and hours so far."""
+	day, now = getdate(today()), now_datetime()
+	devs = frappe.get_list("HiperTracker Device", filters={"active": 1, "employee": ["is", "set"]},
+						   fields=["name", "employee", "employee_name", "last_status"], limit_page_length=0)
+	emps = list({d.employee for d in devs})
+	logs, shift_of, shifts, on_leave = {}, {}, {}, set()
+	if emps:
+		for c in frappe.get_all("Employee Checkin", filters=[["employee", "in", emps], ["time", ">=", f"{day} 00:00:00"]],
+								fields=["employee", "log_type", "time"], order_by="time asc", limit_page_length=0):
+			logs.setdefault(c.employee, []).append(c)
+		for a in frappe.get_all("Shift Assignment", fields=["employee", "shift_type", "end_date"], limit_page_length=0,
+								filters=[["employee", "in", emps], ["docstatus", "=", 1], ["status", "=", "Active"],
+										 ["start_date", "<=", day]]):
+			if not a.end_date or getdate(a.end_date) >= day:
+				shift_of[a.employee] = a.shift_type
+		for e in frappe.get_all("Employee", filters=[["name", "in", emps]], fields=["name", "default_shift"]):
+			if e.name not in shift_of and e.default_shift:
+				shift_of[e.name] = e.default_shift
+		for st in set(shift_of.values()):
+			shifts[st] = frappe.db.get_value("Shift Type", st, ["start_time", "late_entry_grace_period"], as_dict=True)
+		on_leave = set(frappe.get_all("Leave Application", pluck="employee", filters=[
+			["employee", "in", emps], ["docstatus", "=", 1], ["from_date", "<=", day], ["to_date", ">=", day]]))
+	rows = []
+	for d in devs:
+		first_in = last_out = open_in = None
+		worked = 0.0
+		for c in logs.get(d.employee, []):
+			if c.log_type == "IN":
+				first_in = first_in or c.time
+				open_in = open_in or c.time
+			elif c.log_type == "OUT":
+				last_out = c.time
+				if open_in:
+					worked += time_diff_in_seconds(c.time, open_in)
+					open_in = None
+		if open_in:
+			worked += time_diff_in_seconds(now, open_in)
+		status = "On leave" if d.employee in on_leave else "In" if open_in else "Out" if first_in else "Not in"
+		late, shift = 0, shift_of.get(d.employee)
+		s = shifts.get(shift)
+		if first_in and s and s.start_time:
+			late = max(int(time_diff_in_seconds(first_in, get_datetime(f"{day} {s.start_time}")) // 60)
+					   - cint(s.late_entry_grace_period), 0)
+		rows.append({"employee": d.employee, "name": d.employee_name or d.employee, "device": d.name, "status": status,
+					 "first_in": str(first_in)[11:16] if first_in else None, "last_out": str(last_out)[11:16] if last_out else None,
+					 "hours": round(worked / 3600.0, 1), "late": late, "shift": shift, "gps": d.last_status})
+	rank = {"In": 0, "Out": 1, "Not in": 2, "On leave": 3}
+	rows.sort(key=lambda r: (rank.get(r["status"], 4), r["name"].lower()))
+	count = lambda f: len([r for r in rows if f(r)])  # noqa: E731
+	return {"date": str(day), "rows": rows, "total": len(rows), "in": count(lambda r: r["status"] == "In"),
+			"came": count(lambda r: r["first_in"]), "late": count(lambda r: r["late"]),
+			"not_in": count(lambda r: r["status"] == "Not in"), "leave": count(lambda r: r["status"] == "On leave")}
