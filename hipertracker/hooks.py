@@ -28,6 +28,7 @@ override_whitelisted_methods = {
 	"hipertracker_position": "hipertracker.api.position",
 	"hipertracker_mobile_config": "hipertracker.api.mobile_config",
 	"hipertracker_checkin": "hipertracker.api.checkin",
+	"hipertracker_my_day": "hipertracker.api.my_day",
 }
 
 # Alert heads about checked-in phones that stopped reporting; trim old location history

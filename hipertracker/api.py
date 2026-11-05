@@ -119,6 +119,10 @@ def history(device, date=None):
 	"""The route a phone reported on one day, plus the employee's check ins / outs."""
 	if not frappe.get_list("HiperTracker Device", filters={"name": device}, pluck="name"):
 		frappe.throw("You do not have access to this device.", frappe.PermissionError)
+	return _route(device, date)
+
+
+def _route(device, date=None):
 	day = getdate(date or today())
 	start, end = get_datetime(f"{day} 00:00:00"), get_datetime(f"{day} 23:59:59")
 	rows = frappe.get_all(
@@ -523,4 +527,38 @@ def checkin(log_type, latitude=None, longitude=None, accuracy=None):
 		"time": str(now),
 		"checkin": doc.name,
 		"employee_name": emp.employee_name,
+	}
+
+
+@frappe.whitelist()
+def my_day(days=14):
+	"""For the phone app's My Day tab: my check ins / outs for the last days and today's travel."""
+	emp = _my_employee()
+	days = min(max(cint(days) or 14, 1), 62)
+	start = get_datetime(f"{add_days(today(), -(days - 1))} 00:00:00")
+	logs = frappe.get_all(
+		"Employee Checkin",
+		filters=[["employee", "=", emp.name], ["time", ">=", start]],
+		fields=["log_type", "time", "latitude", "longitude"],
+		order_by="time desc",
+		limit_page_length=500,
+	)
+	device = frappe.db.get_value("HiperTracker Device", {"employee": emp.name}, "name")
+	summary = {"distance_km": 0, "points": 0, "gps_off": 0, "first": None, "last": None}
+	if device:
+		route = _route(device, today())  # the worker's own phone; no device permission needed
+		points = route["points"]
+		summary.update(
+			distance_km=route["distance_km"],
+			points=len(points),
+			gps_off=len([e for e in route["events"] if e["event"] == "GPS Off"]),
+			first=f"{today()} {points[0][2]}:00" if points else None,
+			last=f"{today()} {points[-1][2]}:00" if points else None,
+		)
+	return {
+		"employee": emp.name,
+		"employee_name": emp.employee_name,
+		"device": device,
+		"logs": [{"log_type": l.log_type, "time": str(l.time), "lat": l.latitude, "lon": l.longitude} for l in logs],
+		"today": summary,
 	}

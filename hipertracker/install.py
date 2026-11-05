@@ -34,6 +34,7 @@ OLD_MOBILE_SCRIPTS = (
 	"HiperTracker Offline Watch",
 	"HiperTracker Cleanup",
 	"HiperTracker Device - Key",
+	"HiperTracker My Day API",
 )
 
 
