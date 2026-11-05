@@ -5,10 +5,6 @@
 
   const COLORS = { online: '#16a34a', offline: '#dc2626', gps_off: '#d97706', off_duty: '#9ca3af', unknown: '#6b7280' };
   const LABELS = { online: 'Online', offline: 'Offline', gps_off: 'GPS Off', off_duty: 'Off duty', unknown: 'No data' };
-  const ICONS = {
-    Person: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="7" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8z"/></svg>',
-    Vehicle: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>'
-  };
 
   let state = { data: null, map: null, markers: {}, selected: null, fitted: false, base: null, sat: null, route: null, routeDate: null, routeSum: '' };
 
@@ -63,16 +59,20 @@
     setTimeout(() => map.invalidateSize(), 300);
   }
 
-  function chipHtml(d, selected) {
+  // a person / vehicle is just a coloured dot; name and speed show on hover or tap
+  function dotHtml(d, selected) {
     const color = COLORS[d.status] || COLORS.unknown;
-    const sub = d.status === 'gps_off' ? '<small style="color:' + color + '">GPS switched off</small>'
-      : d.status === 'off_duty' ? '<small style="color:' + color + '">Off duty</small>'
-      : d.status === 'online' ? '<small style="color:' + color + '">' + (d.speed || 0) + ' km/h</small>'
-      : '<small style="color:' + color + '">' + (d.speed || 0) + ' km/h • ' + ago(d.age_minutes) + '</small>';
-    return '<div style="position:relative">' +
-      '<span class="ht-dot ' + (d.status === 'gps_off' ? 'ht-pulse' : '') + '" style="background:' + color + '"></span>' +
-      '<div class="ht-chip' + (selected ? ' sel' : '') + '"><span style="color:' + color + '">' + (ICONS[d.tracks] || ICONS.Person) + '</span>' +
-      '<div><b>' + esc(d.label) + '</b>' + sub + '</div></div></div>';
+    return '<span class="ht-dot' + (d.status === 'gps_off' ? ' ht-pulse' : '') + (selected ? ' sel' : '') +
+      '" style="background:' + color + '"></span>';
+  }
+
+  function tipHtml(d) {
+    const color = COLORS[d.status] || COLORS.unknown;
+    const sub = d.status === 'gps_off' ? 'GPS switched off'
+      : d.status === 'off_duty' ? 'Off duty'
+      : d.status === 'online' ? (d.speed || 0) + ' km/h'
+      : (d.speed || 0) + ' km/h • ' + ago(d.age_minutes);
+    return '<b>' + esc(d.label) + '</b><br><span style="color:' + color + '">' + sub + '</span>';
   }
 
   function renderMarkers() {
@@ -82,11 +82,12 @@
       if (d.lat == null || d.lon == null) return;
       const key = String(d.identifier);
       keep[key] = true;
-      const icon = L.divIcon({ className: 'ht-icon', html: chipHtml(d, state.selected === key), iconSize: [0, 0] });
+      const icon = L.divIcon({ className: 'ht-icon', html: dotHtml(d, state.selected === key), iconSize: [0, 0] });
       let m = state.markers[key];
-      if (m) { m.setLatLng([d.lat, d.lon]); m.setIcon(icon); }
+      if (m) { m.setLatLng([d.lat, d.lon]); m.setIcon(icon); m.setTooltipContent(tipHtml(d)); }
       else {
         m = L.marker([d.lat, d.lon], { icon: icon, riseOnHover: true }).addTo(map);
+        m.bindTooltip(tipHtml(d), { direction: 'top', offset: [0, -10] });
         m.on('click', (e) => { L.DomEvent.stopPropagation(e); select(key, true); });
         state.markers[key] = m;
       }

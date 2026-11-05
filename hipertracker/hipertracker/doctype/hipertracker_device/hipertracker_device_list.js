@@ -79,7 +79,7 @@ window.htmini = window.htmini || (function () {
 		const html = "<b>" + esc(d.label) + "</b>" + (d.employee_name && d.employee_name !== d.label ? " · " + esc(d.employee_name) : "") +
 			'<br><span style="color:' + color + '">' + sub + "</span>";
 		if (m.getTooltip()) m.setTooltipContent(html);
-		else m.bindTooltip(html, { permanent: true, direction: "right", offset: [10, 0] });
+		else m.bindTooltip(html, { direction: "top", offset: [0, -8] }); // name shows on hover / tap
 	}
 
 	// One day's route from hipertracker_history: blue line, green start, red last point,

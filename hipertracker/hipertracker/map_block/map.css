@@ -31,15 +31,9 @@
 .ht-fs { position:absolute; top:12px; right:12px; z-index:500; width:38px; height:34px; border:0; border-radius:10px; background:#fff;
   box-shadow:0 2px 8px rgba(0,0,0,.15); cursor:pointer; font-size:16px; color:#374151; }
 
-.ht-chip { display:flex; align-items:center; gap:6px; background:#fff; color:#111827; border-radius:10px; padding:5px 9px 5px 7px;
-  box-shadow:0 2px 8px rgba(0,0,0,.18); white-space:nowrap; font-size:12px; line-height:1.15; transform: translate(14px,-30px);
-  border:2px solid transparent; }
-.ht-chip.sel { border-color:#111827; }
-.ht-chip b { font-size:12px; display:block; }
-.ht-chip small { font-size:11px; display:block; }
-.ht-chip svg { width:22px; height:22px; flex:none; }
-.ht-dot { position:absolute; left:-7px; top:-7px; width:14px; height:14px; border-radius:50%; border:2px solid #fff;
-  box-shadow:0 0 0 2px rgba(0,0,0,.12); }
+.ht-dot { position:absolute; left:-8px; top:-8px; width:16px; height:16px; border-radius:50%; border:3px solid #fff;
+  box-shadow:0 1px 4px rgba(0,0,0,.35); cursor:pointer; }
+.ht-dot.sel { box-shadow:0 0 0 3px #111827; }
 .ht-pulse { animation: htpulse 1.4s infinite; }
 @keyframes htpulse { 0%{ box-shadow:0 0 0 0 rgba(217,119,6,.6);} 100%{ box-shadow:0 0 0 14px rgba(217,119,6,0);} }
 .leaflet-div-icon.ht-icon { background:transparent; border:0; }
