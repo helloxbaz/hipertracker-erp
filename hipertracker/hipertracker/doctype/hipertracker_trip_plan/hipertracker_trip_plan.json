@@ -25,6 +25,7 @@
   "actual_km",
   "notes",
   "fuel_section",
+  "vehicle",
   "mileage",
   "fuel_price",
   "fuel_column",
@@ -176,15 +177,25 @@
    "label": "Fuel estimate"
   },
   {
+   "fieldname": "vehicle",
+   "fieldtype": "Link",
+   "options": "Vehicle",
+   "label": "Vehicle",
+   "description": "The vehicle assigned to the employee (Vehicle > Employee), filled in by itself. Change it here if another vehicle is used."
+  },
+  {
    "fieldname": "mileage",
    "fieldtype": "Float",
    "label": "Vehicle mileage (km per litre)",
-   "description": "From the phone's vehicle, or HiperTracker Settings. Change it here for this trip."
+   "description": "From the vehicle",
+   "read_only": 1
   },
   {
    "fieldname": "fuel_price",
    "fieldtype": "Currency",
-   "label": "Petrol price per litre"
+   "label": "Fuel price per litre",
+   "read_only": 1,
+   "description": "From HiperTracker Settings, by the vehicle's fuel type"
   },
   {
    "fieldname": "fuel_column",
@@ -193,13 +204,13 @@
   {
    "fieldname": "fuel_litres",
    "fieldtype": "Float",
-   "label": "Petrol needed (litres)",
+   "label": "Fuel needed (litres)",
    "read_only": 1
   },
   {
    "fieldname": "fuel_cost",
    "fieldtype": "Currency",
-   "label": "Petrol cost",
+   "label": "Fuel cost",
    "read_only": 1
   },
   {

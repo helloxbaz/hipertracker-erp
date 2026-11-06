@@ -57,6 +57,7 @@ OLD_MOBILE_SCRIPTS = (
 	"HiperTracker My Trips API",
 	"HiperTracker My Trip API",
 	"HiperTracker My Vehicle API",
+	"HiperTracker Edit My Trip API",
 	"HiperTracker My Leave API",
 	"HiperTracker Apply Leave API",
 	"HiperTracker My Expenses API",
@@ -266,6 +267,14 @@ def make_location_fields():
 			{"fieldname": "ht_coords_column", "fieldtype": "Column Break", "insert_after": "ht_latitude"},
 			{"fieldname": "ht_longitude", "fieldtype": "Float", "label": "Longitude", "precision": "7", "no_copy": 1,
 			 "insert_after": "ht_coords_column"},
+		]
+	if frappe.db.exists("DocType", "Vehicle"):
+		# assign a vehicle to an employee (Vehicle > Employee); its mileage gives the fuel of their trips
+		fields["Vehicle"] = [
+			{"fieldname": "ht_trips_section", "fieldtype": "Section Break", "label": "Trips (HiperTracker)", "insert_after": "doors"},
+			{"fieldname": "ht_mileage", "fieldtype": "Float", "label": "Mileage (km per litre)", "insert_after": "ht_trips_section",
+			 "in_list_view": 1,
+			 "description": "Used for the fuel estimate of trips by the employee this vehicle is assigned to (Employee field above)"},
 		]
 	if frappe.db.exists("DocType", "Expense Claim Detail"):
 		# claim a trip's petrol: pick the trip on an expense line (public/js/expense_claim.js fills the amount)

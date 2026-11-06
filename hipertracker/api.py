@@ -930,7 +930,7 @@ def save_my_trip(stops, date=None, title=None, start_lat=None, start_lon=None, m
 		"doctype": "HiperTracker Trip Plan", "employee": emp.name, "date": day,
 		"title": title or f"My trip - {frappe.utils.formatdate(day)}",
 		"notes": f"Planned in the app by {emp.employee_name or frappe.session.user}", "stops": rows,
-		"start_latitude": flt(start_lat), "start_longitude": flt(start_lon), "mileage": flt(mileage),
+		"start_latitude": flt(start_lat), "start_longitude": flt(start_lon),
 	}).insert(ignore_permissions=True)
 	return {"name": plan.name, "planned_km": plan.planned_km, "planned_minutes": plan.planned_minutes,
 			"fuel_litres": plan.fuel_litres, "fuel_cost": plan.fuel_cost}
@@ -995,21 +995,67 @@ def my_trip(plan):
 			"stops": [_stop_json(st) for st in pl.stops], "track": track}
 
 
+def _my_vehicle(emp):
+	return frappe.db.get_value("Vehicle", {"employee": emp.name}, "name") or (
+		frappe.db.get_value("HiperTracker Device", {"employee": emp.name}, "vehicle"))
+
+
 @frappe.whitelist()
-def my_vehicle(mileage=None):
-	"""My vehicle's mileage (km per litre) and the petrol price; pass mileage to save it on my phone's device."""
+def my_vehicle():
+	"""The vehicle assigned to me (Vehicle > Employee, else my phone's), its mileage and the fuel price.
+	Vehicles, mileage and prices are set in the ERP, not the app."""
 	emp = _my_employee()
-	dev = _my_device(emp)
-	if mileage not in (None, ""):
-		m = flt(mileage)
-		if m < 0 or m > 200:
-			frappe.throw("Enter the mileage in km per litre (for example 40 for a bike, 15 for a car).")
-		if not dev:
-			frappe.throw("This phone is not set up in HiperTracker yet.")
-		frappe.db.set_value("HiperTracker Device", dev.name, "mileage", m)
-	own = flt(frappe.db.get_value("HiperTracker Device", dev.name, "mileage")) if dev else 0
-	return {"mileage": own or flt(frappe.db.get_single_value("HiperTracker Settings", "default_mileage")),
-			"own": 1 if own else 0, "fuel_price": flt(frappe.db.get_single_value("HiperTracker Settings", "fuel_price"))}
+	s = frappe.get_cached_doc("HiperTracker Settings")
+	out = {"vehicle": None, "make": None, "model": None, "fuel_type": None, "own": 0,
+		   "mileage": flt(s.default_mileage), "fuel_price": flt(s.fuel_price)}
+	veh = _my_vehicle(emp)
+	v = frappe.db.get_value("Vehicle", veh, ["name", "make", "model", "fuel_type", "ht_mileage"], as_dict=True) if veh else None
+	if v:
+		out.update(vehicle=v.name, make=v.make, model=v.model, fuel_type=v.fuel_type)
+		if flt(v.ht_mileage):
+			out.update(mileage=flt(v.ht_mileage), own=1)
+		if v.fuel_type == "Diesel" and flt(s.diesel_price):
+			out["fuel_price"] = flt(s.diesel_price)
+	return out
+
+
+@frappe.whitelist(methods=["POST"])
+def edit_my_trip(plan, stops, title=None, start_lat=None, start_lon=None):
+	"""Change the stops still to visit of one of my trips. Stops already reached / left / skipped stay first;
+	the stops sent replace the rest, in that order."""
+	emp = _my_employee()
+	if not frappe.db.exists("HiperTracker Trip Plan", plan):
+		frappe.throw("Trip not found.")
+	pl = frappe.get_doc("HiperTracker Trip Plan", plan)
+	if pl.employee != emp.name:
+		frappe.throw("This is not your trip.", frappe.PermissionError)
+	if pl.status not in ("Planned", "In Progress"):
+		frappe.throw(f"This trip is {str(pl.status).lower()} and can't be changed.")
+	stops = json.loads(stops) if isinstance(stops, str) else (stops or [])
+	keep = [st for st in pl.stops if st.status != "Pending"]
+	done = {f"{st.reference_doctype}/{st.reference_name}" for st in keep if st.reference_doctype and st.reference_name}
+	rows = []
+	for s in stops[:50]:
+		if s.get("type") and s.get("name"):
+			if f"{s['type']}/{s['name']}" not in done:
+				rows.append({"reference_doctype": s["type"], "reference_name": s["name"], "status": "Pending"})
+		elif s.get("lat") and s.get("lon"):
+			rows.append({"stop_name": s.get("label") or "Stop", "latitude": flt(s["lat"]), "longitude": flt(s["lon"]),
+						 "status": "Pending"})
+	if not keep and not rows:
+		frappe.throw("Keep at least one place to visit.")
+	pl.set("stops", keep)
+	for r in rows:
+		pl.append("stops", r)
+	for i, st in enumerate(pl.stops, 1):
+		st.idx = i
+	if title:
+		pl.title = title[:140]
+	if flt(start_lat) and flt(start_lon) and pl.status == "Planned":
+		pl.start_latitude, pl.start_longitude = flt(start_lat), flt(start_lon)
+	pl.save(ignore_permissions=True)
+	return {"name": pl.name, "planned_km": pl.planned_km, "planned_minutes": pl.planned_minutes,
+			"fuel_litres": pl.fuel_litres, "fuel_cost": pl.fuel_cost}
 
 
 # ---------------------------------------------------------------------------------------------

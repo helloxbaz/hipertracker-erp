@@ -52,6 +52,7 @@
   "fuel_column",
   "default_mileage",
   "fuel_expense_type",
+  "diesel_price",
   "routing_url"
  ],
  "fields": [
@@ -346,6 +347,13 @@
    "options": "Expense Claim Type",
    "label": "Expense type for trip petrol",
    "description": "Used when a worker claims the petrol of a trip from the app"
+  },
+  {
+   "fieldname": "diesel_price",
+   "fieldtype": "Currency",
+   "label": "Diesel price per litre",
+   "default": "95",
+   "description": "For vehicles whose Fuel Type is Diesel (others use the petrol price)"
   },
   {
    "fieldname": "routing_url",

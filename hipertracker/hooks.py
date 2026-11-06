@@ -40,6 +40,7 @@ override_whitelisted_methods = {
 	"hipertracker_my_trips": "hipertracker.api.my_trips",
 	"hipertracker_my_trip": "hipertracker.api.my_trip",
 	"hipertracker_my_vehicle": "hipertracker.api.my_vehicle",
+	"hipertracker_edit_my_trip": "hipertracker.api.edit_my_trip",
 	"hipertracker_my_leave": "hipertracker.api.my_leave",
 	"hipertracker_apply_leave": "hipertracker.api.apply_leave",
 	"hipertracker_my_expenses": "hipertracker.api.my_expenses",

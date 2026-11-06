@@ -47,8 +47,7 @@
   "security_section",
   "device_key",
   "limits_section",
-  "speed_limit",
-  "mileage"
+  "speed_limit"
  ],
  "fields": [
   {
@@ -332,12 +331,6 @@
    "label": "Speed Limit (km/h)",
    "non_negative": 1,
    "description": "Leave 0 to use the limit in HiperTracker Settings."
-  },
-  {
-   "fieldname": "mileage",
-   "fieldtype": "Float",
-   "label": "Vehicle mileage (km per litre)",
-   "description": "For the fuel estimate of trip plans. The worker can also set it in the app."
   }
  ],
  "index_web_pages_for_search": 0,

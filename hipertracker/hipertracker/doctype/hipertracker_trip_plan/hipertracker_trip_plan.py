@@ -84,11 +84,18 @@ class HiperTrackerTripPlan(Document):
 			st.leg_km, st.leg_minutes = (round(legs[j][0], 1), round(legs[j][1])) if 0 <= j < len(legs) else (0, 0)
 		self.planned_km = round(sum(lg[0] for lg in legs), 1)
 		self.planned_minutes = round(sum(lg[1] for lg in legs))
-		if not flt(self.mileage):
-			own = flt(frappe.db.get_value("HiperTracker Device", self.device, "mileage")) if self.device else 0
-			self.mileage = own or flt(frappe.db.get_single_value("HiperTracker Settings", "default_mileage"))
-		if not flt(self.fuel_price):
-			self.fuel_price = flt(frappe.db.get_single_value("HiperTracker Settings", "fuel_price"))
+		# the trip's vehicle (else the one assigned to the employee, else the phone's) gives the mileage; the price
+		# per litre comes from Settings by the vehicle's fuel type - all set in the ERP, not the app
+		if not self.vehicle and self.employee:
+			self.vehicle = frappe.db.get_value("Vehicle", {"employee": self.employee}, "name")
+		if not self.vehicle and self.device:
+			self.vehicle = frappe.db.get_value("HiperTracker Device", self.device, "vehicle")
+		if self.status != "Completed" or not flt(self.mileage):
+			settings = frappe.get_cached_doc("HiperTracker Settings")
+			v = frappe.db.get_value("Vehicle", self.vehicle, ["ht_mileage", "fuel_type"], as_dict=True) if self.vehicle else None
+			self.mileage = flt(v and v.ht_mileage) or flt(settings.default_mileage)
+			diesel = v and v.fuel_type == "Diesel" and flt(settings.diesel_price)
+			self.fuel_price = flt(settings.diesel_price) if diesel else flt(settings.fuel_price)
 		self.fuel_litres = round(self.planned_km / flt(self.mileage), 2) if flt(self.mileage) else 0
 		self.fuel_cost = round(self.fuel_litres * flt(self.fuel_price)) if self.fuel_litres else 0
 
