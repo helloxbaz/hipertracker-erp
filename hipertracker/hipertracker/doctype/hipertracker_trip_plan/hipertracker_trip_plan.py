@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+import frappe.integrations.utils
 from frappe.model.document import Document
 from frappe.utils import flt, formatdate
 
@@ -16,7 +17,7 @@ TITLE = {
 	"CRM Organization": ["organization_name"],
 }
 PHONE = ("mobile_no", "contact_mobile", "phone", "contact_phone")
-ADDRESS = ("primary_address", "address_display", "customer_address")
+ADDRESS = ("hm_address", "primary_address", "address_display", "customer_address")
 
 
 def _first(doc, fields):
@@ -34,7 +35,6 @@ class HiperTrackerTripPlan(Document):
 		if not self.title:
 			self.title = f"{self.employee_name or self.employee or 'Trip'} - {formatdate(self.date)}"
 		new = self.is_new()
-		prev, planned = None, 0.0
 		for st in self.stops:
 			if st.reference_doctype and st.reference_doctype not in VISIT_DOCTYPES:
 				frappe.throw(f"Stop {st.idx}: a visit can be a {', '.join(VISIT_DOCTYPES)}.")
@@ -54,15 +54,43 @@ class HiperTrackerTripPlan(Document):
 							 "Location, or click the map on this plan.")
 			if new:
 				st.update({"status": "Pending", "arrived_at": None, "left_at": None, "minutes": 0, "out_of_order": 0})
-			cur = [flt(st.latitude), flt(st.longitude)]
-			if prev:
-				planned += _km(prev[0], prev[1], cur[0], cur[1])
-			prev = cur
-		self.planned_km = round(planned * 1.25, 1)  # roads run about 25 % longer than straight lines
+		self._legs_and_fuel()
 		done = len([s for s in self.stops if s.status != "Pending"])
 		self.progress = f"{done} / {len(self.stops)}"
 		if new:
 			self.update({"status": "Planned", "started_at": None, "finished_at": None, "actual_km": 0})
+
+	def _legs_and_fuel(self):
+		"""Road km and driving minutes from the start (if set) / previous stop to each stop, the totals, and the
+		petrol needed (km / mileage) and its cost."""
+		start = [flt(self.get("start_latitude")), flt(self.get("start_longitude"))]
+		pts = ([start] if all(start) else []) + [[flt(s.latitude), flt(s.longitude)] for s in self.stops]
+		legs = []
+		if len(pts) > 1:
+			base = frappe.db.get_single_value("HiperTracker Settings", "routing_url") or "https://router.project-osrm.org"
+			try:
+				r = frappe.integrations.utils.make_get_request(
+					f"{base.rstrip('/')}/route/v1/driving/" + ";".join(f"{lon},{lat}" for lat, lon in pts[:60]) + "?overview=false")
+				if r and r.get("code") == "Ok" and r.get("routes"):
+					legs = [[flt(lg.get("distance")) / 1000, flt(lg.get("duration")) / 60] for lg in r["routes"][0].get("legs") or []]
+			except Exception:
+				legs = []
+			if len(legs) != len(pts) - 1:
+				# roads run about 25 % longer than straight lines; about 30 km/h
+				legs = [[_km(*a, *b) * 1.25, _km(*a, *b) * 1.25 / 30 * 60] for a, b in zip(pts, pts[1:])]
+		offset = 0 if all(start) else -1
+		for i, st in enumerate(self.stops):
+			j = i + offset
+			st.leg_km, st.leg_minutes = (round(legs[j][0], 1), round(legs[j][1])) if 0 <= j < len(legs) else (0, 0)
+		self.planned_km = round(sum(lg[0] for lg in legs), 1)
+		self.planned_minutes = round(sum(lg[1] for lg in legs))
+		if not flt(self.mileage):
+			own = flt(frappe.db.get_value("HiperTracker Device", self.device, "mileage")) if self.device else 0
+			self.mileage = own or flt(frappe.db.get_single_value("HiperTracker Settings", "default_mileage"))
+		if not flt(self.fuel_price):
+			self.fuel_price = flt(frappe.db.get_single_value("HiperTracker Settings", "fuel_price"))
+		self.fuel_litres = round(self.planned_km / flt(self.mileage), 2) if flt(self.mileage) else 0
+		self.fuel_cost = round(self.fuel_litres * flt(self.fuel_price)) if self.fuel_litres else 0
 
 	def _from_record(self, st):
 		"""Name, phone, address and location from the customer / lead / deal; an Opportunity or CRM Deal without a

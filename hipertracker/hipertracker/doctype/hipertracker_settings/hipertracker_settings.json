@@ -47,6 +47,10 @@
   "speed_limit",
   "speed_column",
   "speed_alert",
+  "fuel_section",
+  "fuel_price",
+  "fuel_column",
+  "default_mileage",
   "routing_url"
  ],
  "fields": [
@@ -312,6 +316,28 @@
    "fieldtype": "Check",
    "label": "Alert head when someone goes over the limit",
    "default": "1"
+  },
+  {
+   "fieldname": "fuel_section",
+   "fieldtype": "Section Break",
+   "label": "Fuel"
+  },
+  {
+   "fieldname": "fuel_price",
+   "fieldtype": "Currency",
+   "label": "Petrol price per litre",
+   "default": "106",
+   "description": "Used to work out the fuel cost of a trip plan"
+  },
+  {
+   "fieldname": "fuel_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_mileage",
+   "fieldtype": "Float",
+   "label": "Default vehicle mileage (km per litre)",
+   "description": "Used when a phone's own vehicle mileage is not set"
   },
   {
    "fieldname": "routing_url",

@@ -753,17 +753,11 @@ def my_day(days=14):
 		)
 	plans = []
 	for pl in frappe.get_all("HiperTracker Trip Plan", filters={"employee": emp.name, "date": today(), "status": ["!=", "Cancelled"]},
-							 fields=["name", "title", "status", "progress"], order_by="creation asc"):
+							 fields=["name", "title", "status", "progress", "date", "planned_km", "planned_minutes", "fuel_litres",
+									 "fuel_cost", "mileage"], order_by="creation asc"):
 		stops = frappe.get_all("HiperTracker Trip Stop", filters={"parent": pl.name, "parenttype": "HiperTracker Trip Plan"},
-							   fields=["idx", "stop_name", "task", "latitude", "longitude", "planned_time", "status", "arrived_at", "left_at",
-									   "phone", "address", "reference_doctype", "reference_name"],
-							   order_by="idx asc")
-		plans.append({**pl, "stops": [{
-			"idx": st.idx, "name": st.stop_name, "task": st.task, "lat": st.latitude, "lon": st.longitude,
-			"planned": str(st.planned_time).rjust(8, "0")[:5] if st.planned_time else None, "status": st.status,
-			"arrived": str(st.arrived_at)[11:16] if st.arrived_at else None,
-			"left": str(st.left_at)[11:16] if st.left_at else None, "phone": st.phone, "address": st.address,
-			"type": st.reference_doctype, "ref": st.reference_name} for st in stops]})
+							   fields=["*"], order_by="idx asc")
+		plans.append({**pl, "date": str(pl.date), "stops": [_stop_json(st) for st in stops]})
 	return {
 		"plans": plans,
 		"employee": emp.name,
@@ -918,7 +912,7 @@ def best_order(points):
 
 
 @frappe.whitelist(methods=["POST"])
-def save_my_trip(stops, date=None, title=None):
+def save_my_trip(stops, date=None, title=None, start_lat=None, start_lon=None, mileage=None):
 	"""A worker plans their own trip in the app: a Trip Plan for their own employee, stops in visiting order.
 	stops = JSON list of {"type": doctype, "name": record} or {"lat", "lon", "label"}."""
 	emp = _my_employee()
@@ -936,8 +930,86 @@ def save_my_trip(stops, date=None, title=None):
 		"doctype": "HiperTracker Trip Plan", "employee": emp.name, "date": day,
 		"title": title or f"My trip - {frappe.utils.formatdate(day)}",
 		"notes": f"Planned in the app by {emp.employee_name or frappe.session.user}", "stops": rows,
+		"start_latitude": flt(start_lat), "start_longitude": flt(start_lon), "mileage": flt(mileage),
 	}).insert(ignore_permissions=True)
-	return {"name": plan.name, "planned_km": plan.planned_km}
+	return {"name": plan.name, "planned_km": plan.planned_km, "planned_minutes": plan.planned_minutes,
+			"fuel_litres": plan.fuel_litres, "fuel_cost": plan.fuel_cost}
+
+
+def _stop_json(st):
+	hhmm = lambda v: str(v)[11:16] if v else None  # noqa: E731
+	return {
+		"idx": st.idx, "name": st.stop_name, "task": st.task, "lat": st.latitude, "lon": st.longitude,
+		"planned": str(st.planned_time).rjust(8, "0")[:5] if st.planned_time else None, "status": st.status,
+		"arrived": hhmm(st.arrived_at), "left": hhmm(st.left_at), "minutes": st.minutes, "phone": st.phone,
+		"address": st.address, "type": st.reference_doctype, "ref": st.reference_name,
+		"leg_km": st.leg_km, "leg_minutes": st.leg_minutes,
+	}
+
+
+PLAN_FIELDS = ["name", "title", "date", "status", "progress", "planned_km", "planned_minutes", "actual_km",
+			   "fuel_litres", "fuel_cost", "mileage", "started_at", "finished_at"]
+
+
+def _plan_json(pl):
+	return {
+		"name": pl.name, "title": pl.title, "date": str(pl.date), "status": pl.status, "progress": pl.progress,
+		"planned_km": pl.planned_km, "planned_minutes": pl.planned_minutes, "actual_km": pl.actual_km,
+		"fuel_litres": pl.fuel_litres, "fuel_cost": pl.fuel_cost, "mileage": pl.mileage,
+		"started": str(pl.started_at)[11:16] if pl.started_at else None,
+		"finished": str(pl.finished_at)[11:16] if pl.finished_at else None,
+	}
+
+
+@frappe.whitelist()
+def my_trips(days=60):
+	"""For the app's My trips: my trip plans, newest first."""
+	emp = _my_employee()
+	since = add_days(today(), -min(max(cint(days) or 60, 1), 366))
+	return [_plan_json(pl) for pl in frappe.get_all(
+		"HiperTracker Trip Plan", filters=[["employee", "=", emp.name], ["date", ">=", since]], fields=PLAN_FIELDS,
+		order_by="date desc, creation desc", limit_page_length=300)]
+
+
+@frappe.whitelist()
+def my_trip(plan):
+	"""One of my trip plans: every stop (km / minutes from the previous one) and the route the phone took."""
+	emp = _my_employee()
+	if not frappe.db.exists("HiperTracker Trip Plan", plan):
+		frappe.throw("Trip not found.")
+	pl = frappe.get_doc("HiperTracker Trip Plan", plan)
+	if pl.employee != emp.name:
+		frappe.throw("This is not your trip.", frappe.PermissionError)
+	track = []
+	if pl.device:
+		t0 = pl.started_at or get_datetime(f"{pl.date} 00:00:00")
+		t1 = pl.finished_at or get_datetime(f"{pl.date} 23:59:59")
+		rows = frappe.get_all("HiperTracker Position", filters=[["device", "=", pl.device], ["device_time", ">=", t0],
+																["device_time", "<=", t1], ["event", "=", "Location"]],
+							  fields=["latitude", "longitude", "accuracy"], order_by="device_time asc", limit_page_length=20000)
+		pts = [[round(flt(r.latitude), 5), round(flt(r.longitude), 5)] for r in rows
+			   if r.latitude is not None and r.longitude is not None and not (r.accuracy and flt(r.accuracy) > 200)]
+		track = pts[:: max(1, len(pts) // 1200)]
+	start = [pl.start_latitude, pl.start_longitude] if flt(pl.start_latitude) and flt(pl.start_longitude) else None
+	return {**_plan_json(pl), "fuel_price": pl.fuel_price, "start": start, "notes": pl.notes,
+			"stops": [_stop_json(st) for st in pl.stops], "track": track}
+
+
+@frappe.whitelist()
+def my_vehicle(mileage=None):
+	"""My vehicle's mileage (km per litre) and the petrol price; pass mileage to save it on my phone's device."""
+	emp = _my_employee()
+	dev = _my_device(emp)
+	if mileage not in (None, ""):
+		m = flt(mileage)
+		if m < 0 or m > 200:
+			frappe.throw("Enter the mileage in km per litre (for example 40 for a bike, 15 for a car).")
+		if not dev:
+			frappe.throw("This phone is not set up in HiperTracker yet.")
+		frappe.db.set_value("HiperTracker Device", dev.name, "mileage", m)
+	own = flt(frappe.db.get_value("HiperTracker Device", dev.name, "mileage")) if dev else 0
+	return {"mileage": own or flt(frappe.db.get_single_value("HiperTracker Settings", "default_mileage")),
+			"own": 1 if own else 0, "fuel_price": flt(frappe.db.get_single_value("HiperTracker Settings", "fuel_price"))}
 
 
 # ---------------------------------------------------------------------------------------------

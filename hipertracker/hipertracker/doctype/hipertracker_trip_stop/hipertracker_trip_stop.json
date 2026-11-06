@@ -24,7 +24,11 @@
   "column_b",
   "left_at",
   "minutes",
-  "out_of_order"
+  "out_of_order",
+  "leg_section",
+  "leg_km",
+  "leg_column",
+  "leg_minutes"
  ],
  "fields": [
   {
@@ -163,6 +167,31 @@
    "label": "Out of Order",
    "read_only": 1,
    "no_copy": 1
+  },
+  {
+   "fieldname": "leg_section",
+   "fieldtype": "Section Break",
+   "label": "From the previous stop"
+  },
+  {
+   "fieldname": "leg_km",
+   "fieldtype": "Float",
+   "label": "Road km",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1
+  },
+  {
+   "fieldname": "leg_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "leg_minutes",
+   "fieldtype": "Int",
+   "label": "Drive minutes",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 1
   }
  ],
  "index_web_pages_for_search": 0,

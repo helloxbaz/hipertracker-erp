@@ -21,8 +21,19 @@
   "finished_at",
   "column_b",
   "planned_km",
+  "planned_minutes",
   "actual_km",
-  "notes"
+  "notes",
+  "fuel_section",
+  "mileage",
+  "fuel_price",
+  "fuel_column",
+  "fuel_litres",
+  "fuel_cost",
+  "start_section",
+  "start_latitude",
+  "start_column",
+  "start_longitude"
  ],
  "fields": [
   {
@@ -141,6 +152,12 @@
    "no_copy": 1
   },
   {
+   "fieldname": "planned_minutes",
+   "fieldtype": "Int",
+   "label": "Planned driving time (minutes)",
+   "read_only": 1
+  },
+  {
    "fieldname": "actual_km",
    "fieldtype": "Float",
    "label": "Actual (km)",
@@ -152,6 +169,59 @@
    "fieldname": "notes",
    "fieldtype": "Small Text",
    "label": "Notes"
+  },
+  {
+   "fieldname": "fuel_section",
+   "fieldtype": "Section Break",
+   "label": "Fuel estimate"
+  },
+  {
+   "fieldname": "mileage",
+   "fieldtype": "Float",
+   "label": "Vehicle mileage (km per litre)",
+   "description": "From the phone's vehicle, or HiperTracker Settings. Change it here for this trip."
+  },
+  {
+   "fieldname": "fuel_price",
+   "fieldtype": "Currency",
+   "label": "Petrol price per litre"
+  },
+  {
+   "fieldname": "fuel_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "fuel_litres",
+   "fieldtype": "Float",
+   "label": "Petrol needed (litres)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "fuel_cost",
+   "fieldtype": "Currency",
+   "label": "Petrol cost",
+   "read_only": 1
+  },
+  {
+   "fieldname": "start_section",
+   "fieldtype": "Section Break",
+   "label": "Start",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "start_latitude",
+   "fieldtype": "Float",
+   "label": "Start latitude",
+   "description": "Where the trip starts (set when planned in the app). Empty = starts at stop 1."
+  },
+  {
+   "fieldname": "start_column",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "start_longitude",
+   "fieldtype": "Float",
+   "label": "Start longitude"
   }
  ],
  "index_web_pages_for_search": 0,
