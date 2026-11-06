@@ -11,6 +11,8 @@
   checked-in phone stops reporting.
 """
 
+import json
+
 import frappe
 import frappe.integrations.utils
 from frappe.utils import (
@@ -741,7 +743,7 @@ def my_day(days=14):
 		summary.update(
 			distance_km=route["distance_km"],
 			points=len(points),
-			gps_off=len([e for e in route["events"] if e["event"] == "GPS Off"]),
+			gps_off=len(_off_spells(route)),
 			first=f"{today()} {points[0][2]}:00" if points else None,
 			last=f"{today()} {points[-1][2]}:00" if points else None,
 			trips=[{k: t[k] for k in ("start", "end", "minutes", "distance_km", "avg_speed", "max_speed")} for t in route["trips"]],
@@ -770,6 +772,149 @@ def my_day(days=14):
 		"logs": [{"log_type": l.log_type, "time": str(l.time), "lat": l.latitude, "lon": l.longitude} for l in logs],
 		"today": summary,
 	}
+
+
+def _off_spells(route):
+	"""Times location was switched off: [[off, back_on or None], ...]. Phones resend events, so repeated
+	"GPS Off" / "GPS Off Alarm" before it comes back count once; a GPS On event or a new fix ends a spell."""
+	marks = [(get_datetime(e["time"]), e["event"]) for e in route["events"]]
+	marks += [(get_datetime(f"{route['date']} {p[2]}:00"), "Location") for p in route["points"]]
+	spells, off = [], None
+	for t, ev in sorted(marks, key=lambda m: m[0]):
+		if ev in ("GPS Off", "GPS Off Alarm"):
+			off = off or t
+		elif off and (ev == "GPS On" or (ev == "Location" and t > off)):
+			spells.append([off, t])
+			off = None
+	if off:
+		spells.append([off, None])
+	return spells
+
+
+@frappe.whitelist()
+def my_log(date=None):
+	"""For the phone app's Activity log: everything I did on a day, in time order."""
+	emp = _my_employee()
+	day = getdate(date or today())
+	items = []
+	start, end = get_datetime(f"{day} 00:00:00"), get_datetime(f"{day} 23:59:59")
+	for c in frappe.get_all("Employee Checkin", filters=[["employee", "=", emp.name], ["time", ">=", start], ["time", "<=", end]],
+							fields=["log_type", "time"], order_by="time asc"):
+		items.append({"at": str(c.time), "kind": "in" if c.log_type == "IN" else "out",
+					  "title": "Checked in" if c.log_type == "IN" else "Checked out", "detail": ""})
+	summary = {"distance_km": 0, "moving_minutes": 0, "stopped_minutes": 0, "trips": 0, "stops": 0, "gps_off": 0, "gps_off_minutes": 0}
+	device = frappe.db.get_value("HiperTracker Device", {"employee": emp.name}, "name")
+	if device:
+		route = _route(device, day)
+		spells = _off_spells(route)
+		for off, on in spells:
+			mins = int((on - off).total_seconds() // 60) if on else 0
+			summary["gps_off_minutes"] += mins
+			items.append({"at": str(off), "kind": "gps_off", "title": "Location switched off",
+						  "detail": f"Back on at {str(on)[11:16]} ({mins} min)" if on else "Not turned back on"})
+		summary.update(distance_km=route["distance_km"], trips=len(route["trips"]), stops=len(route["stops"]), gps_off=len(spells),
+					   moving_minutes=route["moving_minutes"], stopped_minutes=route["stopped_minutes"])
+		for t in route["trips"]:
+			items.append({"at": f"{day} {t['start']}:00", "kind": "trip", "title": f"Travelled {t['distance_km']} km",
+						  "detail": f"{t['start']} - {t['end']} · {t['minutes']} min · top {t['max_speed']} km/h"})
+		for st in route["stops"]:
+			items.append({"at": f"{day} {st['start']}:00", "kind": "stop", "title": f"Stopped {st['minutes']} min",
+						  "detail": f"{st['start']} - {'now' if st['ongoing'] else st['end']}", "lat": st["lat"], "lon": st["lon"]})
+	for pl in frappe.get_all("HiperTracker Trip Plan", filters={"employee": emp.name, "date": day}, fields=["name", "title"]):
+		for st in frappe.get_all("HiperTracker Trip Stop", filters={"parent": pl.name, "parenttype": "HiperTracker Trip Plan",
+																	"arrived_at": ["is", "set"]},
+								 fields=["stop_name", "arrived_at", "left_at", "minutes"], order_by="idx asc"):
+			left = f"Left {str(st.left_at)[11:16]} · {st.minutes} min there" if st.left_at else "Still there"
+			items.append({"at": str(st.arrived_at), "kind": "visit", "title": f"Reached {st.stop_name or ''}",
+						  "detail": f"{left} · {pl.title or pl.name}"})
+	items.sort(key=lambda x: x["at"])
+	return {"date": str(day), "employee_name": emp.employee_name, "summary": summary, "items": items}
+
+
+LOCATION_TITLE = {
+	"Customer": "customer_name", "Lead": "lead_name", "Opportunity": "title", "Supplier": "supplier_name",
+	"Prospect": "company_name", "CRM Lead": "lead_name", "CRM Deal": "organization", "CRM Organization": "organization_name",
+}
+
+
+@frappe.whitelist()
+def visit_places(lat=None, lon=None, q=None):
+	"""Customers, leads, deals, suppliers ... that have a Location, nearest to the phone first (for planning a trip)."""
+	_my_employee()
+	lat, lon, q = flt(lat), flt(lon), str(q or "").strip().lower()
+	out = []
+	for dt, tf in LOCATION_TITLE.items():
+		if not frappe.db.exists("DocType", dt):
+			continue
+		for r in frappe.get_all(dt, filters=[["ht_latitude", "!=", 0]], fields=["name", tf, "ht_latitude", "ht_longitude"],
+								limit_page_length=2000):
+			if not (r.ht_latitude and r.ht_longitude):
+				continue
+			title = str(r.get(tf) or r.name)
+			if q and q not in title.lower() and q not in str(r.name).lower():
+				continue
+			km = round(_km(lat, lon, flt(r.ht_latitude), flt(r.ht_longitude)), 2) if lat and lon else None
+			out.append({"type": dt, "name": r.name, "title": title, "lat": flt(r.ht_latitude), "lon": flt(r.ht_longitude), "km": km})
+	out.sort(key=lambda x: (x["km"] if x["km"] is not None else 99999, x["title"]))
+	return out[:300]
+
+
+@frappe.whitelist()
+def best_order(points):
+	"""Best order to visit places by road from where the phone is (OSRM trip), else nearest-next.
+	points = "lat,lon;..." (first = start). Returns order: indexes 1..n of the places in visiting order."""
+	pts = []
+	for part in str(points or "").split(";"):
+		xy = part.split(",")
+		if len(xy) == 2 and flt(xy[0]) and flt(xy[1]):
+			pts.append((flt(xy[0]), flt(xy[1])))
+	pts = pts[:50]
+	if len(pts) < 2:
+		frappe.throw("Need a start and at least one place.")
+	if len(pts) == 2:
+		return {"order": [1], "how": "only one"}
+	base = frappe.db.get_single_value("HiperTracker Settings", "routing_url") or "https://router.project-osrm.org"
+	try:
+		r = frappe.integrations.utils.make_get_request(
+			f"{base.rstrip('/')}/trip/v1/driving/" + ";".join(f"{lon},{lat}" for lat, lon in pts)
+			+ "?source=first&roundtrip=false&destination=any&overview=false")
+		if r and r.get("code") == "Ok":
+			wp = r.get("waypoints") or []
+			order = [i for _, i in sorted((w.get("waypoint_index"), i) for i, w in enumerate(wp)) if i > 0]
+			if len(order) == len(pts) - 1:
+				return {"order": order, "how": "road"}
+	except Exception:
+		pass
+	left, here, order = list(range(1, len(pts))), pts[0], []
+	while left:
+		i = min(left, key=lambda k: _km(here[0], here[1], pts[k][0], pts[k][1]))
+		order.append(i)
+		left.remove(i)
+		here = pts[i]
+	return {"order": order, "how": "straight line"}
+
+
+@frappe.whitelist(methods=["POST"])
+def save_my_trip(stops, date=None, title=None):
+	"""A worker plans their own trip in the app: a Trip Plan for their own employee, stops in visiting order.
+	stops = JSON list of {"type": doctype, "name": record} or {"lat", "lon", "label"}."""
+	emp = _my_employee()
+	stops = json.loads(stops) if isinstance(stops, str) else (stops or [])
+	if not stops:
+		frappe.throw("Pick at least one place to visit.")
+	rows = []
+	for s in stops[:50]:
+		if s.get("type") and s.get("name"):
+			rows.append({"reference_doctype": s["type"], "reference_name": s["name"]})
+		elif s.get("lat") and s.get("lon"):
+			rows.append({"stop_name": s.get("label") or "Stop", "latitude": flt(s["lat"]), "longitude": flt(s["lon"])})
+	day = getdate(date or today())
+	plan = frappe.get_doc({
+		"doctype": "HiperTracker Trip Plan", "employee": emp.name, "date": day,
+		"title": title or f"My trip - {frappe.utils.formatdate(day)}",
+		"notes": f"Planned in the app by {emp.employee_name or frappe.session.user}", "stops": rows,
+	}).insert(ignore_permissions=True)
+	return {"name": plan.name, "planned_km": plan.planned_km}
 
 
 # ---------------------------------------------------------------------------------------------
