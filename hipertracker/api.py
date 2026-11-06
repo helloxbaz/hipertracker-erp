@@ -1013,6 +1013,170 @@ def my_vehicle(mileage=None):
 
 
 # ---------------------------------------------------------------------------------------------
+# Leave and expense claims from the app
+# ---------------------------------------------------------------------------------------------
+
+
+def _approver(emp_name, field, table):
+	"""The employee's own approver, else the first of their department's."""
+	e = frappe.db.get_value("Employee", emp_name, [field, "department"], as_dict=True) or frappe._dict()
+	if e.get(field):
+		return e.get(field)
+	if e.department:
+		rows = frappe.get_all("Department Approver", filters={"parent": e.department, "parentfield": table},
+							  fields=["approver"], order_by="idx asc", limit=1)
+		return rows[0].approver if rows else None
+	return None
+
+
+@frappe.whitelist()
+def my_leave():
+	"""Leave types with what is left of each, and my leave applications (last three months and later)."""
+	emp = _my_employee()
+	day = getdate(today())
+	types = []
+	for lt in frappe.get_all("Leave Type", fields=["name", "is_lwp"], order_by="name asc"):
+		entries = frappe.get_all("Leave Ledger Entry", filters={
+			"employee": emp.name, "leave_type": lt.name, "docstatus": 1, "is_expired": 0,
+			"from_date": ["<=", day], "to_date": [">=", day]}, fields=["leaves", "transaction_type"], limit=1000)
+		types.append({"name": lt.name, "balance": round(sum(flt(e.leaves) for e in entries), 1),
+					  "allocated": int(any(e.transaction_type == "Leave Allocation" for e in entries)), "unpaid": lt.is_lwp})
+	apps = frappe.get_all("Leave Application", filters=[["employee", "=", emp.name], ["to_date", ">=", add_days(day, -90)]],
+						  fields=["name", "leave_type", "from_date", "to_date", "total_leave_days", "half_day", "status",
+								  "docstatus", "description"], order_by="from_date desc", limit=100)
+	return {"types": types, "applications": [{
+		"name": a.name, "leave_type": a.leave_type, "from": str(a.from_date), "to": str(a.to_date), "days": a.total_leave_days,
+		"half_day": a.half_day, "status": "Cancelled" if a.docstatus == 2 else a.status, "reason": a.description} for a in apps]}
+
+
+@frappe.whitelist(methods=["POST"])
+def apply_leave(leave_type, from_date, to_date=None, half_day=0, reason=None):
+	"""Apply for leave from the app (waits for the leave approver)."""
+	emp = _my_employee()
+	if not frappe.db.exists("Leave Type", leave_type):
+		frappe.throw("Pick the kind of leave.")
+	d0, d1 = getdate(from_date), getdate(to_date or from_date)
+	if d1 < d0:
+		frappe.throw("The last day can't be before the first day.")
+	half = cint(half_day) or str(half_day).lower() == "true"
+	doc = frappe.get_doc({
+		"doctype": "Leave Application", "employee": emp.name, "leave_type": leave_type, "from_date": d0, "to_date": d1,
+		"half_day": 1 if half else 0, "half_day_date": d0 if half else None, "description": (reason or "")[:500],
+		"leave_approver": _approver(emp.name, "leave_approver", "leave_approvers"), "status": "Open",
+		"posting_date": today(), "follow_via_email": 0,
+	}).insert(ignore_permissions=True)
+	return {"name": doc.name, "days": doc.total_leave_days}
+
+
+def _trip_fuel(pl):
+	"""Petrol for a trip: km (travelled, else planned) / mileage x petrol price."""
+	km = flt(pl.actual_km) if flt(pl.actual_km) > 0 else flt(pl.planned_km)
+	mileage = flt(pl.mileage)
+	price = flt(pl.fuel_price) or flt(frappe.db.get_single_value("HiperTracker Settings", "fuel_price"))
+	litres = km / mileage if mileage else 0
+	return {
+		"km": round(km, 1), "actual": 1 if flt(pl.actual_km) > 0 else 0, "mileage": mileage, "price": price,
+		"litres": round(litres, 2), "amount": round(litres * price),
+		"description": f"Petrol for {pl.title or pl.name} ({pl.name}): {round(km, 1)} km "
+					   f"{'travelled' if flt(pl.actual_km) > 0 else 'planned'} / {mileage} km per litre = "
+					   f"{round(litres, 2)} L x Rs {price}",
+	}
+
+
+def _claimed_in(plan):
+	r = frappe.db.sql("""select c.name from `tabExpense Claim Detail` d join `tabExpense Claim` c on c.name = d.parent
+						 where d.ht_trip_plan = %s and c.docstatus < 2 limit 1""", plan)
+	return r[0][0] if r else None
+
+
+@frappe.whitelist()
+def my_expenses():
+	"""Expense types I can claim (set up for my company), my claims, and my trips with their petrol."""
+	emp = _my_employee()
+	company = frappe.db.get_value("Employee", emp.name, "company")
+	types = sorted({t.parent for t in frappe.get_all("Expense Claim Account", filters={
+		"parenttype": "Expense Claim Type", "company": company, "default_account": ["is", "set"]}, fields=["parent"])})
+	fuel_type = frappe.db.get_single_value("HiperTracker Settings", "fuel_expense_type")
+	claims = []
+	for c in frappe.get_all("Expense Claim", filters=[["employee", "=", emp.name], ["posting_date", ">=", add_days(today(), -120)]],
+							fields=["name", "posting_date", "total_claimed_amount", "total_sanctioned_amount", "approval_status",
+									"status", "docstatus"], order_by="posting_date desc, creation desc", limit=100):
+		rows = frappe.get_all("Expense Claim Detail", filters={"parent": c.name, "parenttype": "Expense Claim"},
+							  fields=["expense_type", "expense_date", "amount", "description", "ht_trip_plan"], order_by="idx asc")
+		claims.append({"name": c.name, "date": str(c.posting_date), "claimed": c.total_claimed_amount,
+					   "sanctioned": c.total_sanctioned_amount, "approval": c.approval_status,
+					   "status": "Cancelled" if c.docstatus == 2 else (c.status if c.docstatus == 1 else "Waiting for approval"),
+					   "items": [{"type": r.expense_type, "date": str(r.expense_date), "amount": r.amount,
+								  "description": r.description, "trip": r.ht_trip_plan} for r in rows]})
+	trips = []
+	for pl in frappe.get_all("HiperTracker Trip Plan", filters=[["employee", "=", emp.name], ["date", ">=", add_days(today(), -60)],
+																["status", "!=", "Cancelled"]],
+							 fields=["name", "title", "date", "status", "planned_km", "actual_km", "mileage", "fuel_price"],
+							 order_by="date desc", limit=100):
+		f = _trip_fuel(pl)
+		f.pop("description")
+		trips.append({"name": pl.name, "title": pl.title, "date": str(pl.date), "status": pl.status, **f,
+					  "claimed_in": _claimed_in(pl.name)})
+	return {"types": types, "fuel_type": fuel_type if fuel_type in types else None, "claims": claims, "trips": trips}
+
+
+@frappe.whitelist(methods=["POST"])
+def claim_expense(items, remark=None):
+	"""An expense claim from the app, saved for approval. items = JSON list of {"trip": plan} (its petrol,
+	worked out here) or {"type", "date", "amount", "description"}."""
+	emp = _my_employee()
+	items = json.loads(items) if isinstance(items, str) else (items or [])
+	if not items:
+		frappe.throw("Add at least one expense.")
+	fuel_type = frappe.db.get_single_value("HiperTracker Settings", "fuel_expense_type")
+	rows = []
+	for it in items[:40]:
+		if it.get("trip"):
+			pl = frappe.get_doc("HiperTracker Trip Plan", it["trip"])
+			if pl.employee != emp.name:
+				frappe.throw(f"Trip {pl.name} is not yours.", frappe.PermissionError)
+			if used := _claimed_in(pl.name):
+				frappe.throw(f"The petrol for {pl.title or pl.name} is already claimed in {used}.")
+			if not fuel_type:
+				frappe.throw("Ask the office to set 'Expense type for trip petrol' in HiperTracker Settings.")
+			f = _trip_fuel(pl)
+			if not f["amount"]:
+				frappe.throw("Set your vehicle mileage first (More > Vehicle mileage), then open the trip again.")
+			rows.append({"expense_type": fuel_type, "expense_date": pl.date, "amount": f["amount"],
+						 "sanctioned_amount": f["amount"], "ht_trip_plan": pl.name, "description": f["description"]})
+		else:
+			amount = flt(it.get("amount"))
+			if amount <= 0:
+				frappe.throw("Enter the amount for each expense.")
+			if not it.get("type") or not frappe.db.exists("Expense Claim Type", it["type"]):
+				frappe.throw("Pick the kind of expense.")
+			rows.append({"expense_type": it["type"], "expense_date": getdate(it.get("date") or today()), "amount": amount,
+						 "sanctioned_amount": amount, "description": (it.get("description") or "")[:500]})
+	company = frappe.db.get_value("Employee", emp.name, "company")
+	co = frappe.db.get_value("Company", company, ["default_expense_claim_payable_account", "default_payable_account",
+												  "default_currency"], as_dict=True)
+	doc = frappe.get_doc({
+		"doctype": "Expense Claim", "employee": emp.name, "company": company, "posting_date": today(),
+		"expense_approver": _approver(emp.name, "expense_approver", "expense_approvers"),
+		"payable_account": co.default_expense_claim_payable_account or co.default_payable_account,
+		"currency": co.default_currency, "exchange_rate": 1, "approval_status": "Draft",
+		"remark": (remark or "")[:500] or "Claimed from the HiperTracker app", "expenses": rows,
+	}).insert(ignore_permissions=True)
+	return {"name": doc.name, "total": doc.total_claimed_amount}
+
+
+@frappe.whitelist()
+def trip_fuel(plan):
+	"""Petrol for a trip, for an Expense Claim line in the ERP."""
+	if not frappe.get_list("HiperTracker Trip Plan", filters={"name": plan}, limit=1):
+		frappe.throw("Trip not found.")
+	pl = frappe.get_doc("HiperTracker Trip Plan", plan)
+	return {"employee": pl.employee, "date": str(pl.date), **_trip_fuel(pl),
+			"expense_type": frappe.db.get_single_value("HiperTracker Settings", "fuel_expense_type"),
+			"claimed_in": _claimed_in(plan)}
+
+
+# ---------------------------------------------------------------------------------------------
 # Delivery Trip: planned stops vs the route actually taken
 # ---------------------------------------------------------------------------------------------
 

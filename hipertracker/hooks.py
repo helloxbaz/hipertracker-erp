@@ -40,11 +40,17 @@ override_whitelisted_methods = {
 	"hipertracker_my_trips": "hipertracker.api.my_trips",
 	"hipertracker_my_trip": "hipertracker.api.my_trip",
 	"hipertracker_my_vehicle": "hipertracker.api.my_vehicle",
+	"hipertracker_my_leave": "hipertracker.api.my_leave",
+	"hipertracker_apply_leave": "hipertracker.api.apply_leave",
+	"hipertracker_my_expenses": "hipertracker.api.my_expenses",
+	"hipertracker_claim_expense": "hipertracker.api.claim_expense",
+	"hipertracker_trip_fuel": "hipertracker.api.trip_fuel",
 }
 
 # planned vs actual on the Delivery Trip form
 doctype_js = {
 	"Delivery Trip": "public/js/delivery_trip.js",
+	"Expense Claim": "public/js/expense_claim.js",
 	# the Location map on every record a trip stop can be
 	**{dt: "public/js/location_picker.js" for dt in (
 		"Customer", "Supplier", "Lead", "Opportunity", "Prospect", "CRM Lead", "CRM Deal", "CRM Organization")},

@@ -51,6 +51,7 @@
   "fuel_price",
   "fuel_column",
   "default_mileage",
+  "fuel_expense_type",
   "routing_url"
  ],
  "fields": [
@@ -338,6 +339,13 @@
    "fieldtype": "Float",
    "label": "Default vehicle mileage (km per litre)",
    "description": "Used when a phone's own vehicle mileage is not set"
+  },
+  {
+   "fieldname": "fuel_expense_type",
+   "fieldtype": "Link",
+   "options": "Expense Claim Type",
+   "label": "Expense type for trip petrol",
+   "description": "Used when a worker claims the petrol of a trip from the app"
   },
   {
    "fieldname": "routing_url",

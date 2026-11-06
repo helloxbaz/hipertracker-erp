@@ -56,6 +56,11 @@ OLD_MOBILE_SCRIPTS = (
 	"HiperTracker My Trips API",
 	"HiperTracker My Trip API",
 	"HiperTracker My Vehicle API",
+	"HiperTracker My Leave API",
+	"HiperTracker Apply Leave API",
+	"HiperTracker My Expenses API",
+	"HiperTracker Claim Expense API",
+	"HiperTracker Trip Fuel API",
 	"HiperTracker Trip Plan - Before Save",
 	"HiperTracker CRM Lead - Google Location",
 	"HiperTracker CRM Deal - Google Location",
@@ -260,6 +265,13 @@ def make_location_fields():
 			{"fieldname": "ht_coords_column", "fieldtype": "Column Break", "insert_after": "ht_latitude"},
 			{"fieldname": "ht_longitude", "fieldtype": "Float", "label": "Longitude", "precision": "7", "no_copy": 1,
 			 "insert_after": "ht_coords_column"},
+		]
+	if frappe.db.exists("DocType", "Expense Claim Detail"):
+		# claim a trip's petrol: pick the trip on an expense line (public/js/expense_claim.js fills the amount)
+		fields["Expense Claim Detail"] = [
+			{"fieldname": "ht_trip_plan", "fieldtype": "Link", "options": "HiperTracker Trip Plan", "label": "Trip",
+			 "insert_after": "description",
+			 "description": "Petrol for this HiperTracker trip: the amount comes from its km, the vehicle mileage and the petrol price"},
 		]
 	create_custom_fields(fields, ignore_validate=True)
 	if frappe.db.exists("DocType", "CRM Form Script"):
