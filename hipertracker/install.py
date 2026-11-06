@@ -54,6 +54,8 @@ OLD_MOBILE_SCRIPTS = (
 	"HiperTracker Best Order API",
 	"HiperTracker Save My Trip API",
 	"HiperTracker Trip Plan - Before Save",
+	"HiperTracker CRM Lead - Google Location",
+	"HiperTracker CRM Deal - Google Location",
 )
 
 

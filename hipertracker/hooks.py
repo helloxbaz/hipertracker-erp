@@ -47,6 +47,12 @@ doctype_js = {
 		"Customer", "Supplier", "Lead", "Opportunity", "Prospect", "CRM Lead", "CRM Deal", "CRM Organization")},
 }
 
+# Leads / deals found on Google (Hipersign mobile) get their map Location from Google Places
+doc_events = {
+	"CRM Lead": {"before_save": "hipertracker.api.google_location"},
+	"CRM Deal": {"before_save": "hipertracker.api.google_location"},
+}
+
 # Alert heads about checked-in phones that stopped reporting; trim old location history
 scheduler_events = {
 	"cron": {"*/5 * * * *": ["hipertracker.api.offline_watch"]},

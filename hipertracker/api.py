@@ -831,6 +831,29 @@ def my_log(date=None):
 	return {"date": str(day), "employee_name": emp.employee_name, "summary": summary, "items": items}
 
 
+def google_location(doc, method=None):
+	"""A lead / deal found on Google (Hipersign mobile: shared from Google Maps or caller lookup) gets its
+	map Location from Google Places, using the key in Hipersign Mobile Settings, so it can be a trip stop."""
+	pid = (doc.get("hm_google_place_id") or "").strip()
+	if not pid or not frappe.db.exists("DocType", "Hipersign Mobile Settings"):
+		return
+	old = doc.get_doc_before_save()
+	changed = old is not None and (old.get("hm_google_place_id") or "") != pid
+	if not changed and doc.get("ht_latitude") and doc.get("ht_longitude"):
+		return
+	try:
+		key = frappe.get_cached_doc("Hipersign Mobile Settings").get_password("google_maps_api_key", raise_exception=False)
+		if not key:
+			return
+		r = frappe.integrations.utils.make_get_request(f"https://places.googleapis.com/v1/places/{pid}?fields=location&key={key}")
+		loc = (r or {}).get("location") or {}
+		if loc.get("latitude") and loc.get("longitude"):
+			doc.ht_latitude = round(flt(loc["latitude"]), 7)
+			doc.ht_longitude = round(flt(loc["longitude"]), 7)
+	except Exception as e:
+		frappe.log_error(f"HiperTracker: Google location for {doc.name}", str(e))
+
+
 LOCATION_TITLE = {
 	"Customer": "customer_name", "Lead": "lead_name", "Opportunity": "title", "Supplier": "supplier_name",
 	"Prospect": "company_name", "CRM Lead": "lead_name", "CRM Deal": "organization", "CRM Organization": "organization_name",
