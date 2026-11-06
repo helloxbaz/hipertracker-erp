@@ -48,6 +48,7 @@ OLD_MOBILE_SCRIPTS = (
 	"HiperTracker Delivery Trip API",
 	"HiperTracker Attendance Today API",
 	"HiperTracker Trip Plan API",
+	"HiperTracker Route API",
 	"HiperTracker Trip Plan - Before Save",
 )
 

@@ -12,6 +12,7 @@
 """
 
 import frappe
+import frappe.integrations.utils
 from frappe.utils import (
 	add_days,
 	add_to_date,
@@ -1017,3 +1018,78 @@ def trip_plan(plan, recalc=0):
 	return {"plan": doc.name, "status": doc.status, "device": doc.device, "progress": doc.progress,
 			"planned_km": doc.planned_km, "actual_km": doc.actual_km,
 			"points": [[p[0], p[1], str(p[2])[11:16]] for p in pts], "stops": stops, "last": last}
+
+
+# ---------------------------------------------------------------------------------------------
+# Road route for the app's trip screen
+# ---------------------------------------------------------------------------------------------
+
+_TURN = {
+	"uturn": "Make a U-turn", "sharp right": "Turn sharp right", "right": "Turn right", "slight right": "Keep slightly right",
+	"straight": "Continue straight", "slight left": "Keep slightly left", "left": "Turn left", "sharp left": "Turn sharp left",
+}
+
+
+def _step_text(kind, mod, road, leg):
+	onto = f" onto {road}" if road else ""
+	side = mod.replace("slight ", "") if mod else ""
+	if kind == "depart":
+		return "Head out" + (f" on {road}" if road else "")
+	if kind == "arrive":
+		return f"Arrive at stop {leg + 1}"
+	if kind in ("roundabout", "rotary", "roundabout turn"):
+		return None  # needs the exit number, done by the caller
+	if kind in ("exit roundabout", "exit rotary"):
+		return "Leave the roundabout" + onto
+	if kind == "merge":
+		return f"Merge {side}{onto}"
+	if kind == "on ramp":
+		return "Take the ramp" + (f" on the {side}" if side else "") + onto
+	if kind == "off ramp":
+		return "Take the exit" + (f" on the {side}" if side else "") + onto
+	if kind == "fork":
+		return (f"Keep {side}" if side else "Keep going") + " at the fork" + onto
+	if kind == "end of road":
+		return _TURN.get(mod, "Turn") + " at the end of the road" + onto
+	return _TURN.get(mod, "Continue") + onto
+
+
+@frappe.whitelist()
+def route(points):
+	"""Road route from the phone through the stops still to visit, in order, with turn-by-turn steps.
+	points = "lat,lon;lat,lon;..." (first = the phone, at most 25). Uses the OSRM server in HiperTracker
+	Settings (Routing Server), by default the free public one."""
+	pts = []
+	for part in str(points or "").split(";"):
+		xy = part.split(",")
+		if len(xy) == 2:
+			lat, lon = flt(xy[0]), flt(xy[1])
+			if lat and lon and abs(lat) <= 90 and abs(lon) <= 180:
+				pts.append((round(lat, 6), round(lon, 6)))
+	if len(pts) < 2:
+		frappe.throw("Need where you are and at least one stop.")
+	base = frappe.db.get_single_value("HiperTracker Settings", "routing_url") or "https://router.project-osrm.org"
+	coords = ";".join(f"{lon},{lat}" for lat, lon in pts[:25])
+	r = frappe.integrations.utils.make_get_request(
+		f"{base.rstrip('/')}/route/v1/driving/{coords}?overview=full&geometries=geojson&steps=true")
+	if not r or r.get("code") != "Ok" or not r.get("routes"):
+		frappe.throw("No road route found between these places.")
+	rt = r["routes"][0]
+	steps = []
+	for li, leg in enumerate(rt.get("legs", [])):
+		for s in leg.get("steps", []):
+			m = s.get("maneuver") or {}
+			kind, mod = m.get("type") or "", m.get("modifier") or ""
+			road = (s.get("name") or s.get("ref") or "").strip()
+			road = road if road.strip(" .-") else ""
+			text = _step_text(kind, mod, road, li) or (
+				f"At the roundabout, take exit {m.get('exit') or 1}" + (f" onto {road}" if road else ""))
+			loc = m.get("location") or [0, 0]
+			steps.append({"lat": loc[1], "lon": loc[0], "text": " ".join(text.split()), "type": kind, "modifier": mod,
+						  "distance": round(s.get("distance") or 0), "leg": li})
+	return {
+		"distance": round(rt.get("distance") or 0), "duration": round(rt.get("duration") or 0),
+		"line": [[round(c[1], 6), round(c[0], 6)] for c in rt["geometry"]["coordinates"]],
+		"legs": [{"distance": round(x.get("distance") or 0), "duration": round(x.get("duration") or 0)} for x in rt.get("legs", [])],
+		"steps": steps,
+	}

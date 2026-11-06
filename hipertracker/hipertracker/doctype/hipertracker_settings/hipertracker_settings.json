@@ -46,7 +46,8 @@
   "speed_section",
   "speed_limit",
   "speed_column",
-  "speed_alert"
+  "speed_alert",
+  "routing_url"
  ],
  "fields": [
   {
@@ -311,6 +312,13 @@
    "fieldtype": "Check",
    "label": "Alert head when someone goes over the limit",
    "default": "1"
+  },
+  {
+   "fieldname": "routing_url",
+   "fieldtype": "Data",
+   "label": "Routing Server (OSRM)",
+   "options": "URL",
+   "description": "Road routes for the app's trip screen. Empty = the free public OSRM server (fine for a small team; for heavy use run your own OSRM and put its address here)."
   }
  ],
  "index_web_pages_for_search": 0,
