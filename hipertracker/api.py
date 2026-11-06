@@ -1096,21 +1096,41 @@ def my_leave():
 
 
 @frappe.whitelist(methods=["POST"])
-def apply_leave(leave_type, from_date, to_date=None, half_day=0, reason=None):
-	"""Apply for leave from the app (waits for the leave approver)."""
+def apply_leave(leave_type=None, from_date=None, to_date=None, half_day=0, reason=None, name=None, action=None):
+	"""Apply for leave from the app, or change / withdraw (action="delete") application `name` while it waits
+	for approval."""
 	emp = _my_employee()
-	if not frappe.db.exists("Leave Type", leave_type):
+	doc = None
+	if name:
+		if not frappe.db.exists("Leave Application", name):
+			frappe.throw("Leave application not found.")
+		doc = frappe.get_doc("Leave Application", name)
+		if doc.employee != emp.name:
+			frappe.throw("This is not your leave application.", frappe.PermissionError)
+		if doc.docstatus != 0 or doc.status != "Open":
+			frappe.throw(f"This leave is already {str(doc.status).lower()} and can't be changed.")
+	if action == "delete":
+		if not doc:
+			frappe.throw("Which leave application?")
+		frappe.delete_doc("Leave Application", doc.name, ignore_permissions=True)
+		return {"name": doc.name, "deleted": 1}
+	if not leave_type or not frappe.db.exists("Leave Type", leave_type):
 		frappe.throw("Pick the kind of leave.")
 	d0, d1 = getdate(from_date), getdate(to_date or from_date)
 	if d1 < d0:
 		frappe.throw("The last day can't be before the first day.")
 	half = cint(half_day) or str(half_day).lower() == "true"
-	doc = frappe.get_doc({
-		"doctype": "Leave Application", "employee": emp.name, "leave_type": leave_type, "from_date": d0, "to_date": d1,
-		"half_day": 1 if half else 0, "half_day_date": d0 if half else None, "description": (reason or "")[:500],
-		"leave_approver": _approver(emp.name, "leave_approver", "leave_approvers"), "status": "Open",
-		"posting_date": today(), "follow_via_email": 0,
-	}).insert(ignore_permissions=True)
+	values = {"leave_type": leave_type, "from_date": d0, "to_date": d1, "half_day": 1 if half else 0,
+			  "half_day_date": d0 if half else None, "description": (reason or "")[:500]}
+	if doc:
+		doc.update(values)
+		doc.save(ignore_permissions=True)
+	else:
+		doc = frappe.get_doc({
+			"doctype": "Leave Application", "employee": emp.name, **values,
+			"leave_approver": _approver(emp.name, "leave_approver", "leave_approvers"), "status": "Open",
+			"posting_date": today(), "follow_via_email": 0,
+		}).insert(ignore_permissions=True)
 	return {"name": doc.name, "days": doc.total_leave_days}
 
 
@@ -1129,9 +1149,9 @@ def _trip_fuel(pl):
 	}
 
 
-def _claimed_in(plan):
+def _claimed_in(plan, other_than=""):
 	r = frappe.db.sql("""select c.name from `tabExpense Claim Detail` d join `tabExpense Claim` c on c.name = d.parent
-						 where d.ht_trip_plan = %s and c.docstatus < 2 limit 1""", plan)
+						 where d.ht_trip_plan = %s and c.docstatus < 2 and c.name != %s limit 1""", (plan, other_than or ""))
 	return r[0][0] if r else None
 
 
@@ -1167,10 +1187,25 @@ def my_expenses():
 
 
 @frappe.whitelist(methods=["POST"])
-def claim_expense(items, remark=None):
-	"""An expense claim from the app, saved for approval. items = JSON list of {"trip": plan} (its petrol,
-	worked out here) or {"type", "date", "amount", "description"}."""
+def claim_expense(items=None, remark=None, claim=None, action=None):
+	"""An expense claim from the app, saved for approval; or a change / withdrawal (action="delete") of `claim`
+	while it waits for approval. items = JSON list of {"trip": plan} (its fuel, worked out here) or
+	{"type", "date", "amount", "description"}."""
 	emp = _my_employee()
+	doc = None
+	if claim:
+		if not frappe.db.exists("Expense Claim", claim):
+			frappe.throw("Claim not found.")
+		doc = frappe.get_doc("Expense Claim", claim)
+		if doc.employee != emp.name:
+			frappe.throw("This is not your claim.", frappe.PermissionError)
+		if doc.docstatus != 0 or doc.approval_status != "Draft":
+			frappe.throw(f"This claim is already {str(doc.approval_status or doc.status).lower()} and can't be changed.")
+	if action == "delete":
+		if not doc:
+			frappe.throw("Which claim?")
+		frappe.delete_doc("Expense Claim", doc.name, ignore_permissions=True)
+		return {"name": doc.name, "deleted": 1}
 	items = json.loads(items) if isinstance(items, str) else (items or [])
 	if not items:
 		frappe.throw("Add at least one expense.")
@@ -1181,7 +1216,7 @@ def claim_expense(items, remark=None):
 			pl = frappe.get_doc("HiperTracker Trip Plan", it["trip"])
 			if pl.employee != emp.name:
 				frappe.throw(f"Trip {pl.name} is not yours.", frappe.PermissionError)
-			if used := _claimed_in(pl.name):
+			if used := _claimed_in(pl.name, claim):
 				frappe.throw(f"The petrol for {pl.title or pl.name} is already claimed in {used}.")
 			if not fuel_type:
 				frappe.throw("Ask the office to set 'Expense type for trip petrol' in HiperTracker Settings.")
@@ -1198,6 +1233,13 @@ def claim_expense(items, remark=None):
 				frappe.throw("Pick the kind of expense.")
 			rows.append({"expense_type": it["type"], "expense_date": getdate(it.get("date") or today()), "amount": amount,
 						 "sanctioned_amount": amount, "description": (it.get("description") or "")[:500]})
+	if doc:
+		doc.set("expenses", [])
+		for r in rows:
+			doc.append("expenses", r)
+		doc.remark = (remark or "")[:500] or doc.remark
+		doc.save(ignore_permissions=True)
+		return {"name": doc.name, "total": doc.total_claimed_amount}
 	company = frappe.db.get_value("Employee", emp.name, "company")
 	co = frappe.db.get_value("Company", company, ["default_expense_claim_payable_account", "default_payable_account",
 												  "default_currency"], as_dict=True)
