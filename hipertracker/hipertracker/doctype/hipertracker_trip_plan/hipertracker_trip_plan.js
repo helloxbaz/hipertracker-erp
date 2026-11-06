@@ -2,6 +2,7 @@
 frappe.ui.form.on("HiperTracker Trip Plan", {
 	setup(frm) {
 		frm.set_query("device", () => ({ filters: { active: 1 } }));
+		frm.set_query("reference_doctype", "stops", () => ({ filters: { name: ["in", Object.keys(HTP_VISITS)] } }));
 	},
 	refresh(frm) {
 		clearInterval(frm.__htp_timer);
@@ -27,6 +28,14 @@ frappe.ui.form.on("HiperTracker Trip Plan", {
 });
 
 frappe.ui.form.on("HiperTracker Trip Stop", {
+	reference_doctype(frm, cdt, cdn) {
+		frappe.model.set_value(cdt, cdn, "reference_name", "");
+	},
+	reference_name(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (!row.reference_doctype || !row.reference_name) return;
+		htp_fill_stop(frm, row);
+	},
 	latitude: (frm) => htp_plan_layer(frm),
 	longitude: (frm) => htp_plan_layer(frm),
 	radius: (frm) => htp_plan_layer(frm),
@@ -34,6 +43,63 @@ frappe.ui.form.on("HiperTracker Trip Stop", {
 	stops_remove: (frm) => htp_plan_layer(frm),
 	stops_move: (frm) => htp_plan_layer(frm),
 });
+
+// what a stop can be, the field that holds its name, and its colour on the map
+var HTP_VISITS = {
+	Customer: ["customer_name", "#2563eb"], Lead: ["lead_name", "#f59e0b"], Opportunity: ["title", "#d946ef"],
+	Supplier: ["supplier_name", "#0d9488"], Prospect: ["company_name", "#64748b"], "CRM Lead": ["lead_name", "#f97316"],
+	"CRM Deal": ["organization", "#a855f7"], "CRM Organization": ["organization_name", "#0ea5e9"],
+};
+
+// take the stop's name and location from the customer / lead / deal (the server does the same on save, with fallbacks)
+function htp_fill_stop(frm, row) {
+	const dt = row.reference_doctype;
+	const tf = (HTP_VISITS[dt] || [])[0];
+	frappe.db.get_value(dt, row.reference_name, ["ht_latitude", "ht_longitude"].concat(tf ? [tf] : [])).then((r) => {
+		const v = r.message || {};
+		frappe.model.set_value(row.doctype, row.name, "stop_name", (tf && v[tf]) || row.reference_name);
+		if (v.ht_latitude && v.ht_longitude) {
+			frappe.model.set_value(row.doctype, row.name, "latitude", v.ht_latitude);
+			frappe.model.set_value(row.doctype, row.name, "longitude", v.ht_longitude);
+		} else if (!["Opportunity", "CRM Deal"].includes(dt)) {
+			frappe.msgprint(__("{0} {1} has no location yet. {2} to set it on its map, then pick it again.", [__(dt),
+				"<b>" + htp_esc(row.reference_name) + "</b>",
+				'<a href="/app/' + frappe.router.slug(dt) + "/" + encodeURIComponent(row.reference_name) + '" target="_blank">' + __("Open it") + "</a>"]));
+		}
+		setTimeout(() => htp_plan_layer(frm), 100);
+	});
+}
+
+// every customer / lead / deal that has a location, as small dots: click one to add it as the next stop
+function htp_records_layer(frm) {
+	const map = frm.__htp_map, L = window.L;
+	if (!map || frm.__htp_records) return;
+	const g = (frm.__htp_records = L.layerGroup().addTo(map));
+	Object.keys(HTP_VISITS).forEach((dt) => {
+		const tf = HTP_VISITS[dt][0], color = HTP_VISITS[dt][1];
+		frappe.db.get_list(dt, { fields: ["name", tf, "ht_latitude", "ht_longitude"], filters: [["ht_latitude", "!=", 0]], limit: 1000 })
+			.then((rows) => rows.forEach((r) => {
+				if (!r.ht_latitude || !r.ht_longitude) return;
+				const label = r[tf] || r.name;
+				L.circleMarker([r.ht_latitude, r.ht_longitude], { radius: 6, color: "#fff", weight: 1.5, fillColor: color, fillOpacity: 0.9 })
+					.bindTooltip(htp_esc(__(dt)) + ": " + htp_esc(label) + (frm.doc.status === "Planned" || frm.is_new() ? "<br><i>" + __("Click to add as a stop") + "</i>" : ""))
+					.on("click", (e) => {
+						L.DomEvent.stopPropagation(e);
+						if (!(frm.doc.status === "Planned" || frm.is_new()) || !frm.perm[0] || !frm.perm[0].write) return;
+						if ((frm.doc.stops || []).some((s) => s.reference_doctype === dt && s.reference_name === r.name)) {
+							return frappe.show_alert({ message: __("{0} is already a stop", [label]), indicator: "orange" });
+						}
+						frm.add_child("stops", { reference_doctype: dt, reference_name: r.name, stop_name: label,
+							latitude: r.ht_latitude, longitude: r.ht_longitude, radius: 150 });
+						frm.refresh_field("stops");
+						htp_plan_layer(frm);
+						frappe.show_alert({ message: __("Added {0} as stop {1}", [label, frm.doc.stops.length]), indicator: "green" });
+					})
+					.addTo(g);
+			}))
+			.catch(() => {});
+	});
+}
 
 var HTP_COLORS = { Pending: "#6b7280", Reached: "#f59e0b", Left: "#16a34a", Skipped: "#9ca3af" };
 var htp_esc = (s) => frappe.utils.escape_html(s == null ? "" : String(s));
@@ -45,7 +111,7 @@ function htp_draw(frm) {
 		'<div class="htp-map" style="height:400px;border-radius:10px;overflow:hidden;border:1px solid var(--border-color)"></div>' +
 		'<div class="text-muted small htp-hint" style="margin:6px 0 10px"></div><div class="htp-tab"></div>');
 	wrap.find(".htp-hint").text(frm.doc.status === "Planned" || frm.is_new()
-		? __("Click the map to add a stop there. Stops are visited in the order of the table — drag rows to change it.")
+		? __("Click a coloured dot (a customer, lead, deal or supplier with a location) to add it as the next stop, or click anywhere to add a point. Stops are visited in the order of the table — drag rows to change it.")
 		: __("Grey dashed line: the plan. Blue line: the route actually taken. Red dot: where the phone is now."));
 	htp_leaflet().then(() => {
 		const L = window.L;
@@ -67,6 +133,8 @@ function htp_draw(frm) {
 		});
 		frm.__htp_map = map;
 		frm.__htp_fit = true;
+		frm.__htp_records = null;
+		htp_records_layer(frm);
 		setTimeout(() => map.invalidateSize(), 300);
 		htp_plan_layer(frm);
 		if (!frm.is_new()) htp_load(frm);

@@ -6,6 +6,7 @@ Runs after install and after every migrate, so changes to the map block in this 
 reach the site with a normal `bench migrate`.
 """
 
+import json
 import os
 
 import frappe
@@ -30,6 +31,8 @@ OLD_CLIENT_SCRIPTS = (
 	"HiperTracker Geofence - Map",
 	"HiperTracker Delivery Trip - Live Tracking",
 	"HiperTracker Trip Plan - Map",
+	*(f"HiperTracker {dt} - Location" for dt in (
+		"Customer", "Supplier", "Lead", "Opportunity", "Prospect", "CRM Lead", "CRM Deal", "CRM Organization")),
 )
 OLD_EVENT_SCRIPT = "HiperTracker Device - Sync to Traccar"
 # made by hand on Nexus; replaced by hipertracker.api (mobile_config, checkin, position, history, scheduled jobs)
@@ -75,6 +78,7 @@ def after_migrate():
 def setup():
 	make_roles()
 	make_map_block()
+	make_location_fields()
 	make_sidebar()
 	make_desktop_icon()
 	set_default_settings()
@@ -216,3 +220,56 @@ def retire_old_server_script():
 	for name in OLD_CLIENT_SCRIPTS:
 		if frappe.db.exists("Client Script", name):
 			frappe.db.set_value("Client Script", name, "enabled", 0)
+
+
+# ---------------------------------------------------------------------------------------------
+# Location on customers, leads, deals ... (trip-plan stops take their location from it)
+# ---------------------------------------------------------------------------------------------
+
+LOCATION_AFTER = {
+	"Customer": "loyalty_program_tier", "Supplier": "payment_terms", "Lead": "blog_subscriber",
+	"Opportunity": "competitors", "Prospect": "column_break_16", "CRM Lead": "lead_owner",
+	"CRM Deal": "closed_date", "CRM Organization": "address",
+}
+CRM_DOCTYPES = ("CRM Lead", "CRM Deal", "CRM Organization")
+
+
+def make_location_fields():
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+	fields = {}
+	for dt, after in LOCATION_AFTER.items():
+		if not frappe.db.exists("DocType", dt):
+			continue  # e.g. Frappe CRM not installed
+		fields[dt] = [
+			{"fieldname": "ht_location_section", "fieldtype": "Section Break", "label": "Location", "insert_after": after},
+			{"fieldname": "ht_location_map", "fieldtype": "HTML", "label": "Location Map", "insert_after": "ht_location_section"},
+			{"fieldname": "ht_coords_section", "fieldtype": "Section Break", "insert_after": "ht_location_map"},
+			{"fieldname": "ht_latitude", "fieldtype": "Float", "label": "Latitude", "precision": "7", "no_copy": 1,
+			 "insert_after": "ht_coords_section", "description": "Set by clicking the map above"},
+			{"fieldname": "ht_coords_column", "fieldtype": "Column Break", "insert_after": "ht_latitude"},
+			{"fieldname": "ht_longitude", "fieldtype": "Float", "label": "Longitude", "precision": "7", "no_copy": 1,
+			 "insert_after": "ht_coords_column"},
+		]
+	create_custom_fields(fields, ignore_validate=True)
+	if frappe.db.exists("DocType", "CRM Form Script"):
+		script = _read("crm_form_script.js", "location_picker")
+		for dt in CRM_DOCTYPES:
+			name = f"HiperTracker {dt} Location"
+			body = script.replace("__DT__", dt).replace("__CLS__", dt.replace(" ", ""))
+			if frappe.db.exists("CRM Form Script", name):
+				frappe.db.set_value("CRM Form Script", name, "script", body)
+			else:
+				frappe.get_doc({"doctype": "CRM Form Script", "name": name, "dt": dt, "view": "Form", "enabled": 1,
+								"script": body}).insert(ignore_permissions=True)
+			layout = f"{dt}-Side Panel"
+			if frappe.db.exists("CRM Fields Layout", layout):
+				lay = json.loads(frappe.db.get_value("CRM Fields Layout", layout, "layout") or "[]")
+				if "ht_latitude" not in json.dumps(lay):
+					section = {"label": "Location", "name": "ht_location_section", "opened": True}
+					if lay and "columns" in lay[0]:
+						section["columns"] = [{"name": "column_htloc", "fields": ["ht_latitude", "ht_longitude"]}]
+					else:
+						section["fields"] = ["ht_latitude", "ht_longitude"]
+					lay.append(section)
+					frappe.db.set_value("CRM Fields Layout", layout, "layout", json.dumps(lay))

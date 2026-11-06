@@ -4,14 +4,20 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "place",
+  "reference_doctype",
+  "reference_name",
   "stop_name",
   "planned_time",
   "task",
   "column_a",
+  "phone",
+  "address",
+  "location_section",
   "latitude",
   "longitude",
+  "column_l",
   "radius",
+  "place",
   "progress_section",
   "status",
   "arrived_at",
@@ -22,22 +28,28 @@
  ],
  "fields": [
   {
-   "fieldname": "place",
+   "fieldname": "reference_doctype",
    "fieldtype": "Link",
-   "label": "Place",
-   "options": "HiperTracker Geofence",
+   "label": "Visit Type",
+   "options": "DocType",
    "in_list_view": 1,
-   "columns": 2,
-   "description": "A saved place, or leave empty and set the location yourself"
+   "columns": 1,
+   "description": "Customer, Lead, Opportunity, Supplier, Prospect, CRM Lead, CRM Deal or CRM Organization"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Visit",
+   "options": "reference_doctype",
+   "in_list_view": 1,
+   "columns": 2
   },
   {
    "fieldname": "stop_name",
    "fieldtype": "Data",
    "label": "Stop",
    "in_list_view": 1,
-   "columns": 2,
-   "fetch_from": "place.geofence_name",
-   "fetch_if_empty": 1
+   "columns": 2
   },
   {
    "fieldname": "planned_time",
@@ -56,28 +68,51 @@
    "fieldtype": "Column Break"
   },
   {
+   "fieldname": "phone",
+   "fieldtype": "Data",
+   "label": "Phone",
+   "read_only": 1
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Small Text",
+   "label": "Address",
+   "read_only": 1
+  },
+  {
+   "fieldname": "location_section",
+   "fieldtype": "Section Break",
+   "label": "Location",
+   "collapsible": 1,
+   "description": "Taken from the record's Location. Or click the trip map / set it here for a stop that isn't a record."
+  },
+  {
    "fieldname": "latitude",
    "fieldtype": "Float",
    "label": "Latitude",
-   "precision": "7",
-   "fetch_from": "place.latitude",
-   "fetch_if_empty": 1
+   "precision": "7"
   },
   {
    "fieldname": "longitude",
    "fieldtype": "Float",
    "label": "Longitude",
-   "precision": "7",
-   "fetch_from": "place.longitude",
-   "fetch_if_empty": 1
+   "precision": "7"
+  },
+  {
+   "fieldname": "column_l",
+   "fieldtype": "Column Break"
   },
   {
    "fieldname": "radius",
    "fieldtype": "Int",
-   "label": "Radius (m)",
-   "default": "150",
-   "fetch_from": "place.radius",
-   "fetch_if_empty": 1
+   "label": "Reached Within (m)",
+   "default": "150"
+  },
+  {
+   "fieldname": "place",
+   "fieldtype": "Link",
+   "label": "Saved Place",
+   "options": "HiperTracker Geofence"
   },
   {
    "fieldname": "progress_section",
@@ -132,7 +167,7 @@
  ],
  "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-11-05 19:00:00.000000",
+ "modified": "2026-11-06 10:45:00.000000",
  "modified_by": "Administrator",
  "module": "HiperTracker",
  "name": "HiperTracker Trip Stop",

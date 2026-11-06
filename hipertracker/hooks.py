@@ -35,7 +35,12 @@ override_whitelisted_methods = {
 }
 
 # planned vs actual on the Delivery Trip form
-doctype_js = {"Delivery Trip": "public/js/delivery_trip.js"}
+doctype_js = {
+	"Delivery Trip": "public/js/delivery_trip.js",
+	# the Location map on every record a trip stop can be
+	**{dt: "public/js/location_picker.js" for dt in (
+		"Customer", "Supplier", "Lead", "Opportunity", "Prospect", "CRM Lead", "CRM Deal", "CRM Organization")},
+}
 
 # Alert heads about checked-in phones that stopped reporting; trim old location history
 scheduler_events = {

@@ -390,13 +390,27 @@ def position(**a):
 	return {"ok": 1, "msg": None}
 
 
+def _visit_note(st, text):
+	"""A note on the customer / lead / deal's timeline (CRM screens show 'Comment' type in their activity)."""
+	if not (st.reference_doctype and st.reference_name):
+		return
+	try:
+		frappe.get_doc({
+			"doctype": "Comment", "reference_doctype": st.reference_doctype, "reference_name": st.reference_name,
+			"comment_type": "Comment" if st.reference_doctype.startswith("CRM ") else "Info", "content": "\U0001F4CD " + text,
+		}).insert(ignore_permissions=True)
+	except Exception:
+		pass
+
+
 def _trip_plans(dev, lat, lon, when, who):
 	"""Mark the stops of today's Trip Plans reached / left as the phone gets there."""
 	plans = frappe.get_all("HiperTracker Trip Plan", fields=["name", "status", "notify_head"],
 						   filters={"device": dev.name, "date": getdate(when), "status": ["in", ["Planned", "In Progress", "Completed"]]})
 	for pl in plans:
 		stops = frappe.get_all("HiperTracker Trip Stop", filters={"parent": pl.name, "parenttype": "HiperTracker Trip Plan"},
-							   fields=["name", "idx", "stop_name", "latitude", "longitude", "radius", "status", "arrived_at"],
+							   fields=["name", "idx", "stop_name", "latitude", "longitude", "radius", "status", "arrived_at",
+									   "reference_doctype", "reference_name"],
 							   order_by="idx asc")
 		changed, waiting = False, 0
 		for st in stops:
@@ -407,6 +421,7 @@ def _trip_plans(dev, lat, lon, when, who):
 					frappe.db.set_value("HiperTracker Trip Stop", st.name, {"status": "Reached", "arrived_at": when,
 										"out_of_order": 1 if waiting else 0}, update_modified=False)
 					st.status, changed = "Reached", True
+					_visit_note(st, f"{who} reached here at {format_datetime(when, 'HH:mm')} (trip plan {pl.name})")
 					if pl.notify_head:
 						subject = f"{who} reached {st.stop_name or f'stop {st.idx}'} (stop {st.idx} of {len(stops)})"
 						body = (f"<p><b>{subject}</b> at {format_datetime(when)}.</p>"
@@ -421,6 +436,8 @@ def _trip_plans(dev, lat, lon, when, who):
 						"status": "Left", "left_at": when,
 						"minutes": int(max(time_diff_in_seconds(when, st.arrived_at), 0) // 60)}, update_modified=False)
 					st.status, changed = "Left", True
+					mins = int(max(time_diff_in_seconds(when, st.arrived_at), 0) // 60)
+					_visit_note(st, f"{who} left at {format_datetime(when, 'HH:mm')} after {mins} min (trip plan {pl.name})")
 			if st.status == "Pending":
 				waiting += 1
 		if changed:
@@ -728,18 +745,22 @@ def my_day(days=14):
 			last=f"{today()} {points[-1][2]}:00" if points else None,
 			trips=[{k: t[k] for k in ("start", "end", "minutes", "distance_km", "avg_speed", "max_speed")} for t in route["trips"]],
 			stops=[{k: st[k] for k in ("start", "end", "minutes", "ongoing", "lat", "lon")} for st in route["stops"]],
+			# today's track for the app's route map (at most ~1500 points)
+			track=[[round(p[0], 5), round(p[1], 5)] for p in points[:: max(1, len(points) // 1500)]],
 		)
 	plans = []
 	for pl in frappe.get_all("HiperTracker Trip Plan", filters={"employee": emp.name, "date": today(), "status": ["!=", "Cancelled"]},
 							 fields=["name", "title", "status", "progress"], order_by="creation asc"):
 		stops = frappe.get_all("HiperTracker Trip Stop", filters={"parent": pl.name, "parenttype": "HiperTracker Trip Plan"},
-							   fields=["idx", "stop_name", "task", "latitude", "longitude", "planned_time", "status", "arrived_at", "left_at"],
+							   fields=["idx", "stop_name", "task", "latitude", "longitude", "planned_time", "status", "arrived_at", "left_at",
+									   "phone", "address", "reference_doctype", "reference_name"],
 							   order_by="idx asc")
 		plans.append({**pl, "stops": [{
 			"idx": st.idx, "name": st.stop_name, "task": st.task, "lat": st.latitude, "lon": st.longitude,
 			"planned": str(st.planned_time).rjust(8, "0")[:5] if st.planned_time else None, "status": st.status,
 			"arrived": str(st.arrived_at)[11:16] if st.arrived_at else None,
-			"left": str(st.left_at)[11:16] if st.left_at else None} for st in stops]})
+			"left": str(st.left_at)[11:16] if st.left_at else None, "phone": st.phone, "address": st.address,
+			"type": st.reference_doctype, "ref": st.reference_name} for st in stops]})
 	return {
 		"plans": plans,
 		"employee": emp.name,

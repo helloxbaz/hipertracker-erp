@@ -7,10 +7,26 @@ from frappe.utils import flt, formatdate
 
 from hipertracker.api import _km
 
+# what a stop can be, and the fields that give its name / phone / address
+VISIT_DOCTYPES = ("Customer", "Lead", "Opportunity", "Supplier", "Prospect", "CRM Lead", "CRM Deal", "CRM Organization")
+TITLE = {
+	"Customer": ["customer_name"], "Supplier": ["supplier_name"], "Lead": ["company_name", "lead_name"],
+	"Opportunity": ["customer_name", "title", "party_name"], "Prospect": ["company_name"],
+	"CRM Lead": ["organization", "lead_name"], "CRM Deal": ["organization", "lead_name"],
+	"CRM Organization": ["organization_name"],
+}
+PHONE = ("mobile_no", "contact_mobile", "phone", "contact_phone")
+ADDRESS = ("primary_address", "address_display", "customer_address")
+
+
+def _first(doc, fields):
+	return next((str(doc.get(f)) for f in fields if doc.get(f)), "")
+
 
 class HiperTrackerTripPlan(Document):
-	"""Stops an employee should visit in order; each is marked reached / left from the phone's location
-	(hipertracker.api.position) and the form shows planned vs actual (hipertracker.api.trip_plan)."""
+	"""Stops an employee should visit in order - customers, leads, deals, suppliers ... (their Location), a saved
+	Place, or a point on the map. Each is marked reached / left from the phone (hipertracker.api.position)
+	and the form shows planned vs actual (hipertracker.api.trip_plan)."""
 
 	def validate(self):
 		if not self.device and self.employee:
@@ -20,6 +36,10 @@ class HiperTrackerTripPlan(Document):
 		new = self.is_new()
 		prev, planned = None, 0.0
 		for st in self.stops:
+			if st.reference_doctype and st.reference_doctype not in VISIT_DOCTYPES:
+				frappe.throw(f"Stop {st.idx}: a visit can be a {', '.join(VISIT_DOCTYPES)}.")
+			if st.reference_doctype and st.reference_name and (new or st.status == "Pending"):
+				self._from_record(st)
 			if st.place and not (flt(st.latitude) and flt(st.longitude)):
 				g = frappe.db.get_value("HiperTracker Geofence", st.place,
 										["geofence_name", "latitude", "longitude", "radius"], as_dict=True)
@@ -27,10 +47,11 @@ class HiperTrackerTripPlan(Document):
 					st.latitude, st.longitude = g.latitude, g.longitude
 					st.radius = st.radius or g.radius
 					st.stop_name = st.stop_name or g.geofence_name
-			st.stop_name = st.stop_name or st.place or f"Stop {st.idx}"
+			st.stop_name = st.stop_name or st.reference_name or st.place or f"Stop {st.idx}"
 			st.radius = st.radius or 150
 			if not (flt(st.latitude) and flt(st.longitude)):
-				frappe.throw(f"Stop {st.idx} ({st.stop_name}) has no location. Pick a Place, or set its latitude and longitude.")
+				frappe.throw(f"Stop {st.idx} ({st.stop_name}) has no location. Pick a customer / lead / deal with a "
+							 "Location, or click the map on this plan.")
 			if new:
 				st.update({"status": "Pending", "arrived_at": None, "left_at": None, "minutes": 0, "out_of_order": 0})
 			cur = [flt(st.latitude), flt(st.longitude)]
@@ -42,3 +63,30 @@ class HiperTrackerTripPlan(Document):
 		self.progress = f"{done} / {len(self.stops)}"
 		if new:
 			self.update({"status": "Planned", "started_at": None, "finished_at": None, "actual_km": 0})
+
+	def _from_record(self, st):
+		"""Name, phone, address and location from the customer / lead / deal; an Opportunity or CRM Deal without a
+		location of its own uses its customer, lead or organization's."""
+		r = frappe.get_doc(st.reference_doctype, st.reference_name)
+		st.stop_name = _first(r, TITLE.get(st.reference_doctype, [])) or st.reference_name
+		st.phone = _first(r, PHONE)
+		addr = _first(r, ADDRESS) or ", ".join(str(x) for x in (r.get("city"), r.get("state")) if x)
+		st.address = addr.replace("<br>", ", ").replace("\n", " ").strip(", ")
+		lat, lon = flt(r.get("ht_latitude")), flt(r.get("ht_longitude"))
+		if not (lat and lon):
+			alt = []
+			if st.reference_doctype == "Opportunity" and r.get("opportunity_from") and r.get("party_name"):
+				alt.append((r.opportunity_from, r.party_name))
+			if st.reference_doctype == "CRM Deal":
+				alt += [("CRM Organization", r.get("organization")), ("CRM Lead", r.get("lead"))]
+			for dt, name in alt:
+				if name and frappe.db.exists(dt, name):
+					v = frappe.db.get_value(dt, name, ["ht_latitude", "ht_longitude"], as_dict=True)
+					if v and flt(v.ht_latitude) and flt(v.ht_longitude):
+						lat, lon = flt(v.ht_latitude), flt(v.ht_longitude)
+						break
+		if lat and lon:
+			st.latitude, st.longitude = lat, lon
+		elif not (flt(st.latitude) and flt(st.longitude)):
+			frappe.throw(f"{st.reference_doctype} {st.stop_name} (stop {st.idx}) has no location yet. Open it and set its "
+						 "Location (click its map or use 'Use my current location' there), then save this plan again.")
