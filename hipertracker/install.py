@@ -31,6 +31,7 @@ OLD_CLIENT_SCRIPTS = (
 	"HiperTracker Geofence - Map",
 	"HiperTracker Delivery Trip - Live Tracking",
 	"HiperTracker Trip Plan - Map",
+	"HiperTracker Expense Claim - Trip Petrol",
 	*(f"HiperTracker {dt} - Location" for dt in (
 		"Customer", "Supplier", "Lead", "Opportunity", "Prospect", "CRM Lead", "CRM Deal", "CRM Organization")),
 )
