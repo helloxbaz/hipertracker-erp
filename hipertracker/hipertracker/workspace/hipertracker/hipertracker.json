@@ -2,7 +2,7 @@
  "app": "hipertracker",
  "charts": [],
  "creation": "2026-10-30 16:00:00.000000",
- "content": "[{\"id\": \"htHead01\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>HiperTracker</b> \\u2014 live locations</span>\", \"col\": 12}}, {\"id\": \"htMap001\", \"type\": \"custom_block\", \"data\": {\"custom_block_name\": \"HiperTracker Live Map\", \"col\": 12}}, {\"id\": \"htSpc001\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"htAtt001\", \"type\": \"custom_block\", \"data\": {\"custom_block_name\": \"HiperTracker Attendance Today\", \"col\": 12}}, {\"id\": \"htSpc002\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"htHead04\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Trip plans</b></span>\", \"col\": 12}}, {\"id\": \"htTp0001\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Plan a Trip\", \"col\": 3}}, {\"id\": \"htTp0002\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Trip Plans\", \"col\": 3}}, {\"id\": \"htRp0007\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Delivery Trips\", \"col\": 3}}, {\"id\": \"htSpc004\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"htHead03\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Reports</b></span>\", \"col\": 12}}, {\"id\": \"htRp0001\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Daily Distance\", \"col\": 3}}, {\"id\": \"htRp0002\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Trips\", \"col\": 3}}, {\"id\": \"htRp0003\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Stops\", \"col\": 3}}, {\"id\": \"htRp0004\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Speeding\", \"col\": 3}}, {\"id\": \"htRp0005\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Place Visits\", \"col\": 3}}, {\"id\": \"htRp0006\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Monthly Attendance\", \"col\": 3}}, {\"id\": \"htSpc003\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"htHead02\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Setup</b></span>\", \"col\": 12}}, {\"id\": \"htSc0001\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Devices & People\", \"col\": 3}}, {\"id\": \"htSc0002\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Add Device\", \"col\": 3}}, {\"id\": \"htSc0005\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Places\", \"col\": 3}}, {\"id\": \"htSc0003\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"HiperTracker Settings\", \"col\": 3}}]",
+ "content": "[{\"id\": \"htHead01\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>HiperTracker</b> \\u2014 live locations</span>\", \"col\": 12}}, {\"id\": \"htMap001\", \"type\": \"custom_block\", \"data\": {\"custom_block_name\": \"HiperTracker Live Map\", \"col\": 12}}, {\"id\": \"htSpc001\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"htAtt001\", \"type\": \"custom_block\", \"data\": {\"custom_block_name\": \"HiperTracker Attendance Today\", \"col\": 12}}, {\"id\": \"htSpc002\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"htHead04\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Trip plans</b></span>\", \"col\": 12}}, {\"id\": \"htTp0001\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Plan a Trip\", \"col\": 3}}, {\"id\": \"htTp0002\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Trip Plans\", \"col\": 3}}, {\"id\": \"htRp0007\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Delivery Trips\", \"col\": 3}}, {\"id\": \"htTp0003\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Vehicles\", \"col\": 3}}, {\"id\": \"htSpc005\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"htHead05\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Requests to approve</b></span>\", \"col\": 12}}, {\"id\": \"htRq0001\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Leave Requests\", \"col\": 3}}, {\"id\": \"htRq0002\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Expense Claims\", \"col\": 3}}, {\"id\": \"htSpc004\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"htHead03\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Reports</b></span>\", \"col\": 12}}, {\"id\": \"htRp0001\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Daily Distance\", \"col\": 3}}, {\"id\": \"htRp0002\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Trips\", \"col\": 3}}, {\"id\": \"htRp0003\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Stops\", \"col\": 3}}, {\"id\": \"htRp0004\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Speeding\", \"col\": 3}}, {\"id\": \"htRp0005\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Place Visits\", \"col\": 3}}, {\"id\": \"htRp0006\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Monthly Attendance\", \"col\": 3}}, {\"id\": \"htSpc003\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"htHead02\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Setup</b></span>\", \"col\": 12}}, {\"id\": \"htSc0001\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Devices & People\", \"col\": 3}}, {\"id\": \"htSc0002\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Add Device\", \"col\": 3}}, {\"id\": \"htSc0005\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Places\", \"col\": 3}}, {\"id\": \"htSc0003\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"HiperTracker Settings\", \"col\": 3}}]",
  "custom_blocks": [
   {
    "custom_block_name": "HiperTracker Live Map",
@@ -51,19 +51,22 @@
    "type": "DocType",
    "link_to": "HiperTracker Device",
    "doc_view": "List",
-   "color": "Blue"
+   "color": "Blue",
+   "idx": 1
   },
   {
    "label": "Add Device",
    "type": "URL",
    "url": "/app/hipertracker-device/new",
-   "color": "Green"
+   "color": "Green",
+   "idx": 2
   },
   {
    "label": "HiperTracker Settings",
    "type": "DocType",
    "link_to": "HiperTracker Settings",
-   "color": "Grey"
+   "color": "Grey",
+   "idx": 3
   },
   {
    "color": "Cyan",
@@ -71,7 +74,8 @@
    "label": "Places",
    "link_to": "HiperTracker Geofence",
    "type": "DocType",
-   "doctype": "Workspace Shortcut"
+   "doctype": "Workspace Shortcut",
+   "idx": 4
   },
   {
    "color": "Blue",
@@ -79,7 +83,8 @@
    "link_to": "HiperTracker Daily Distance",
    "type": "Report",
    "doctype": "Workspace Shortcut",
-   "report_ref_doctype": "HiperTracker Position"
+   "report_ref_doctype": "HiperTracker Position",
+   "idx": 5
   },
   {
    "color": "Blue",
@@ -87,7 +92,8 @@
    "link_to": "HiperTracker Trips",
    "type": "Report",
    "doctype": "Workspace Shortcut",
-   "report_ref_doctype": "HiperTracker Position"
+   "report_ref_doctype": "HiperTracker Position",
+   "idx": 6
   },
   {
    "color": "Purple",
@@ -95,7 +101,8 @@
    "link_to": "HiperTracker Stops",
    "type": "Report",
    "doctype": "Workspace Shortcut",
-   "report_ref_doctype": "HiperTracker Position"
+   "report_ref_doctype": "HiperTracker Position",
+   "idx": 7
   },
   {
    "color": "Red",
@@ -103,7 +110,8 @@
    "link_to": "HiperTracker Speeding",
    "type": "Report",
    "doctype": "Workspace Shortcut",
-   "report_ref_doctype": "HiperTracker Position"
+   "report_ref_doctype": "HiperTracker Position",
+   "idx": 8
   },
   {
    "color": "Cyan",
@@ -111,7 +119,8 @@
    "link_to": "HiperTracker Place Visits",
    "type": "Report",
    "doctype": "Workspace Shortcut",
-   "report_ref_doctype": "HiperTracker Geofence Visit"
+   "report_ref_doctype": "HiperTracker Geofence Visit",
+   "idx": 9
   },
   {
    "color": "Green",
@@ -119,7 +128,8 @@
    "link_to": "Monthly Attendance Sheet",
    "type": "Report",
    "doctype": "Workspace Shortcut",
-   "report_ref_doctype": "Attendance"
+   "report_ref_doctype": "Attendance",
+   "idx": 10
   },
   {
    "color": "Orange",
@@ -127,14 +137,16 @@
    "link_to": "Delivery Trip",
    "type": "DocType",
    "doctype": "Workspace Shortcut",
-   "doc_view": "List"
+   "doc_view": "List",
+   "idx": 11
   },
   {
    "color": "Green",
    "label": "Plan a Trip",
    "type": "URL",
    "url": "/app/hipertracker-trip-plan/new",
-   "doctype": "Workspace Shortcut"
+   "doctype": "Workspace Shortcut",
+   "idx": 12
   },
   {
    "color": "Blue",
@@ -142,7 +154,41 @@
    "label": "Trip Plans",
    "link_to": "HiperTracker Trip Plan",
    "type": "DocType",
-   "doctype": "Workspace Shortcut"
+   "doctype": "Workspace Shortcut",
+   "idx": 13
+  },
+  {
+   "color": "Orange",
+   "doc_view": "List",
+   "label": "Vehicles",
+   "link_to": "Vehicle",
+   "type": "DocType",
+   "doctype": "Workspace Shortcut",
+   "url": null,
+   "stats_filter": null,
+   "idx": 14
+  },
+  {
+   "color": "Purple",
+   "doc_view": "List",
+   "label": "Leave Requests",
+   "link_to": "Leave Application",
+   "type": "DocType",
+   "doctype": "Workspace Shortcut",
+   "url": null,
+   "stats_filter": "[[\"Leave Application\",\"status\",\"=\",\"Open\",false]]",
+   "idx": 15
+  },
+  {
+   "color": "Green",
+   "doc_view": "List",
+   "label": "Expense Claims",
+   "link_to": "Expense Claim",
+   "type": "DocType",
+   "doctype": "Workspace Shortcut",
+   "url": null,
+   "stats_filter": "[[\"Expense Claim\",\"approval_status\",\"=\",\"Draft\",false],[\"Expense Claim\",\"docstatus\",\"=\",0,false]]",
+   "idx": 16
   }
  ],
  "title": "HiperTracker",

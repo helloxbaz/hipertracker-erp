@@ -151,6 +151,7 @@ def make_sidebar():
 		 "icon": "map-pin"},
 		{"label": "Place Visits", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Geofence Visit",
 		 "icon": "clock"},
+		{"label": "Vehicles", "type": "Link", "link_type": "DocType", "link_to": "Vehicle", "icon": "truck"},
 		{"label": "Settings", "type": "Link", "link_type": "DocType", "link_to": "HiperTracker Settings",
 		 "icon": "settings"},
 	]
