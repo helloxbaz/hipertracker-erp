@@ -25,7 +25,7 @@ Or, like Traccar, just type the server address in the app: **`https://nexus365.h
 
 ```bash
 cd ~/frappe-bench
-bench get-app https://github.com/helloxbaz/hipertracker
+bench get-app https://github.com/helloxbaz/hipertracker-erp
 bench --site <your-site> install-app hipertracker
 bench --site <your-site> migrate
 ```
