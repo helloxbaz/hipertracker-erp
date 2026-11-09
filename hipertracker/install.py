@@ -207,7 +207,7 @@ def set_default_settings():
 		"refresh_seconds": 30,
 		"stale_minutes": 15,
 		"phone_report_url": "http://gps.hipersignerp.cloud:5055",
-		"app_download_url": "https://github.com/hipersignerp-dev/Hipersign-traccar-client/releases/latest/download/HiperTracker.apk",
+		"app_download_url": "https://github.com/helloxbaz/hipertracker-app/releases/latest/download/HiperTracker.apk",
 		"phone_interval": 60,
 		"phone_distance": 50,
 		"alarm_interval": 30,
@@ -219,6 +219,13 @@ def set_default_settings():
 		if not s.get(key):
 			s.set(key, value)
 			changed = True
+	# the app moved to github.com/helloxbaz/hipertracker-app
+	if "hipersignerp-dev/Hipersign-traccar-client" in (s.get("app_download_url") or ""):
+		s.app_download_url = defaults["app_download_url"]
+		changed = True
+	if not s.get("fuel_expense_type") and frappe.db.exists("Expense Claim Type", "FUEL EXPENCES"):
+		s.fuel_expense_type = "FUEL EXPENCES"
+		changed = True
 	if changed:
 		s.flags.ignore_permissions = True
 		s.save()

@@ -177,7 +177,7 @@ function ht_setup_render(frm) {
 			// the phone sends its locations straight to this ERP, with this device's key
 			const report = window.location.origin + "/api/method/hipertracker_position";
 			const download = s.app_download_url ||
-				"https://github.com/hipersignerp-dev/Hipersign-traccar-client/releases/latest/download/HiperTracker.apk";
+				"https://github.com/helloxbaz/hipertracker-app/releases/latest/download/HiperTracker.apk";
 			const params = new URLSearchParams({
 				id: ident,
 				key: frm.doc.device_key || "",

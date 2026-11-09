@@ -154,7 +154,7 @@
    "fieldname": "app_download_url",
    "fieldtype": "Data",
    "label": "App Download Link",
-   "default": "https://github.com/hipersignerp-dev/Hipersign-traccar-client/releases/latest/download/HiperTracker.apk",
+   "default": "https://github.com/helloxbaz/hipertracker-app/releases/latest/download/HiperTracker.apk",
    "description": "Shown as the 'Install app' QR on each device."
   },
   {
