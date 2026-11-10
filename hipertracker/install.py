@@ -124,14 +124,20 @@ def make_map_block():
 
 
 def _block(name, values):
+	roles = [{"role": r} for r in ("System Manager", *ROLES)]
 	if frappe.db.exists("Custom HTML Block", name):
 		doc = frappe.get_doc("Custom HTML Block", name)
 		doc.update(values)
+		doc.set("roles", roles)
+		doc.flags.ignore_permissions = True
+		doc.save()
 	else:
-		doc = frappe.get_doc({"doctype": "Custom HTML Block", "name": name, **values})
-	doc.set("roles", [{"role": r} for r in ("System Manager", *ROLES)])
-	doc.flags.ignore_permissions = True
-	doc.save() if not doc.is_new() else doc.insert()
+		# a new block: insert (is_new() is False for a dict with a name, so don't rely on it)
+		doc = frappe.new_doc("Custom HTML Block")
+		doc.update(values)
+		doc.set("roles", roles)
+		doc.flags.ignore_permissions = True
+		doc.insert(set_name=name)
 
 
 def make_sidebar():
@@ -163,7 +169,7 @@ def make_sidebar():
 	doc.update({"title": WORKSPACE, "app": APP})
 	doc.set("items", items)
 	doc.flags.ignore_permissions = True
-	doc.save() if not doc.is_new() else doc.insert()
+	doc.insert() if doc.is_new() else doc.save()
 
 
 def make_desktop_icon():
@@ -189,10 +195,11 @@ def make_desktop_icon():
 		doc = frappe.get_doc("Desktop Icon", name)
 		doc.update(values)
 	else:
-		doc = frappe.get_doc({"doctype": "Desktop Icon", **values})
+		doc = frappe.new_doc("Desktop Icon")
+		doc.update(values)
 	doc.flags.ignore_permissions = True
 	doc.flags.ignore_links = True
-	doc.save() if not doc.is_new() else doc.insert()
+	doc.insert() if doc.is_new() else doc.save()
 
 
 def set_default_settings():
@@ -223,7 +230,8 @@ def set_default_settings():
 	if "hipersignerp-dev/Hipersign-traccar-client" in (s.get("app_download_url") or ""):
 		s.app_download_url = defaults["app_download_url"]
 		changed = True
-	if not s.get("fuel_expense_type") and frappe.db.exists("Expense Claim Type", "FUEL EXPENCES"):
+	if (not s.get("fuel_expense_type") and frappe.db.exists("DocType", "Expense Claim Type")
+			and frappe.db.exists("Expense Claim Type", "FUEL EXPENCES")):
 		s.fuel_expense_type = "FUEL EXPENCES"
 		changed = True
 	if changed:
