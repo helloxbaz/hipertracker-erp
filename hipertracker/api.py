@@ -854,6 +854,36 @@ def google_location(doc, method=None):
 		frappe.log_error(f"HiperTracker: Google location for {doc.name}", str(e))
 
 
+def fill_google_locations(limit=300):
+	"""Leads / deals that have a Google place (Hipersign mobile) but no map Location yet get one,
+	so they show in Plan my trip. Runs after every migrate and daily; safe to run again."""
+	if not frappe.db.exists("DocType", "Hipersign Mobile Settings"):
+		return 0
+	key = frappe.get_cached_doc("Hipersign Mobile Settings").get_password("google_maps_api_key", raise_exception=False)
+	if not key:
+		return 0
+	done = 0
+	for dt in ("CRM Lead", "CRM Deal"):
+		meta = frappe.get_meta(dt) if frappe.db.exists("DocType", dt) else None
+		if not meta or not meta.has_field("hm_google_place_id") or not meta.has_field("ht_latitude"):
+			continue
+		rows = frappe.db.sql(f"""select name, hm_google_place_id from `tab{dt}`
+			where ifnull(hm_google_place_id, '') != '' and ifnull(ht_latitude, 0) = 0 limit {cint(limit)}""", as_dict=True)
+		for r in rows:
+			try:
+				g = frappe.integrations.utils.make_get_request(
+					f"https://places.googleapis.com/v1/places/{r.hm_google_place_id.strip()}?fields=location&key={key}")
+				loc = (g or {}).get("location") or {}
+				if loc.get("latitude") and loc.get("longitude"):
+					frappe.db.set_value(dt, r.name, {"ht_latitude": round(flt(loc["latitude"]), 7),
+						"ht_longitude": round(flt(loc["longitude"]), 7)}, update_modified=False)
+					done += 1
+			except Exception as e:
+				frappe.log_error(f"HiperTracker: Google location for {r.name}", str(e))
+		frappe.db.commit()
+	return done
+
+
 LOCATION_TITLE = {
 	"Customer": "customer_name", "Lead": "lead_name", "Opportunity": "title", "Supplier": "supplier_name",
 	"Prospect": "company_name", "CRM Lead": "lead_name", "CRM Deal": "organization", "CRM Organization": "organization_name",

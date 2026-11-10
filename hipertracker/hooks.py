@@ -66,5 +66,5 @@ doc_events = {
 # Alert heads about checked-in phones that stopped reporting; trim old location history
 scheduler_events = {
 	"cron": {"*/5 * * * *": ["hipertracker.api.offline_watch"]},
-	"daily": ["hipertracker.api.cleanup"],
+	"daily": ["hipertracker.api.cleanup", "hipertracker.api.fill_google_locations"],
 }

@@ -90,6 +90,8 @@ def after_install():
 
 def after_migrate():
 	setup()
+	# leads already saved from Hipersign mobile with a Google place: fill their map Location
+	frappe.enqueue("hipertracker.api.fill_google_locations", queue="long", limit=2000, enqueue_after_commit=True)
 
 
 def setup():
