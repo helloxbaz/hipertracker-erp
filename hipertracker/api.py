@@ -848,7 +848,8 @@ def google_location(doc, method=None):
 		key = frappe.get_cached_doc("Hipersign Mobile Settings").get_password("google_maps_api_key", raise_exception=False)
 		if not key:
 			return
-		r = frappe.integrations.utils.make_get_request(f"https://places.googleapis.com/v1/places/{pid}?fields=location&key={key}")
+		r = frappe.integrations.utils.make_get_request(f"https://places.googleapis.com/v1/places/{pid}",
+			headers={"X-Goog-Api-Key": key, "X-Goog-FieldMask": "location"})
 		loc = (r or {}).get("location") or {}
 		if loc.get("latitude") and loc.get("longitude"):
 			doc.ht_latitude = round(flt(loc["latitude"]), 7)
@@ -874,8 +875,10 @@ def fill_google_locations(limit=300):
 			where ifnull(hm_google_place_id, '') != '' and ifnull(ht_latitude, 0) = 0 limit {cint(limit)}""", as_dict=True)
 		for r in rows:
 			try:
+				# the key goes in a header, so it never shows in an error log
 				g = frappe.integrations.utils.make_get_request(
-					f"https://places.googleapis.com/v1/places/{r.hm_google_place_id.strip()}?fields=location&key={key}")
+					f"https://places.googleapis.com/v1/places/{r.hm_google_place_id.strip()}",
+					headers={"X-Goog-Api-Key": key, "X-Goog-FieldMask": "location"})
 				loc = (g or {}).get("location") or {}
 				if loc.get("latitude") and loc.get("longitude"):
 					frappe.db.set_value(dt, r.name, {"ht_latitude": round(flt(loc["latitude"]), 7),
