@@ -110,7 +110,7 @@
    "fieldname": "radius",
    "fieldtype": "Int",
    "label": "Reached Within (m)",
-   "default": "150"
+   "default": "60"
   },
   {
    "fieldname": "place",

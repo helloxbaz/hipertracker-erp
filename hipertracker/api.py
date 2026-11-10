@@ -406,6 +406,13 @@ def _visit_note(st, text):
 		pass
 
 
+def _stop_radius(st):
+	"""Metres from a stop that count as being there: 60 (at the place, not just passing on the other side
+	of the road); a stop given its own bigger radius (a big site) keeps it. 150 was the old default."""
+	r = cint(st.get("radius") if hasattr(st, "get") else st.radius)
+	return 60 if not r or r == 150 else r
+
+
 def _trip_plans(dev, lat, lon, when, who):
 	"""Mark the stops of today's Trip Plans reached / left as the phone gets there."""
 	plans = frappe.get_all("HiperTracker Trip Plan", fields=["name", "status", "notify_head"],
@@ -422,7 +429,7 @@ def _trip_plans(dev, lat, lon, when, who):
 		for st in stops:
 			if st.status != "Skipped":
 				d = _km(lat, lon, flt(st.latitude), flt(st.longitude)) * 1000
-				r = cint(st.radius) or 150
+				r = _stop_radius(st)
 				if st.status == "Pending" and st.name == nxt and d <= r:
 					frappe.db.set_value("HiperTracker Trip Stop", st.name, {"status": "Reached", "arrived_at": when,
 										"out_of_order": 0}, update_modified=False)
@@ -1530,7 +1537,7 @@ def trip_plan(plan, recalc=0):
 			if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > 100):
 				continue
 			pts.append([round(flt(r.latitude), 6), round(flt(r.longitude), 6), get_datetime(r.device_time)])
-	near = lambda p, st, extra=0: _km(p[0], p[1], flt(st.latitude), flt(st.longitude)) * 1000 <= (cint(st.radius) or 150) + extra  # noqa: E731
+	near = lambda p, st, extra=0: _km(p[0], p[1], flt(st.latitude), flt(st.longitude)) * 1000 <= _stop_radius(st) + extra  # noqa: E731
 
 	if cint(recalc):
 		after = 0  # in the planned order: each stop is looked for only after the one before it
@@ -1577,7 +1584,7 @@ def trip_plan(plan, recalc=0):
 			late = int(time_diff_in_seconds(st.arrived_at, get_datetime(f"{doc.date} {st.planned_time}")) // 60)
 		stops.append({
 			"idx": st.idx, "name": st.stop_name, "place": st.place, "task": st.task, "lat": flt(st.latitude),
-			"lon": flt(st.longitude), "radius": cint(st.radius) or 150, "status": st.status,
+			"lon": flt(st.longitude), "radius": _stop_radius(st), "status": st.status,
 			"planned": str(st.planned_time).rjust(8, "0")[:5] if st.planned_time else None,
 			"arrived": str(st.arrived_at)[11:16] if st.arrived_at else None,
 			"left": str(st.left_at)[11:16] if st.left_at else None, "minutes": st.minutes, "late": late,
