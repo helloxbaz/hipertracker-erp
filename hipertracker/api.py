@@ -1752,6 +1752,76 @@ def _osrm_routes(pts):
 	return out
 
 
+def _encode_polyline(pts):
+	out, plat, plon = [], 0, 0
+	for lat, lon in pts:
+		for v, prev in ((int(round(lat * 1e5)), plat), (int(round(lon * 1e5)), plon)):
+			d = v - prev
+			d = ~(d << 1) if d < 0 else d << 1
+			while d >= 0x20:
+				out.append(chr((0x20 | (d & 0x1F)) + 63))
+				d >>= 5
+			out.append(chr(d + 63))
+		plat, plon = int(round(lat * 1e5)), int(round(lon * 1e5))
+	return "".join(out)
+
+
+@frappe.whitelist()
+def fuel_stations(points):
+	"""Petrol pumps along the way ahead. points = "lat,lon;..." along the route, the first is the phone.
+	Google Places (key in Hipersign Mobile Settings) with the time / distance to each from here,
+	else OpenStreetMap pumps within ~500 m of the route."""
+	pts = []
+	for part in str(points or "").split(";"):
+		xy = part.split(",")
+		if len(xy) == 2 and flt(xy[0]) and flt(xy[1]):
+			pts.append((round(flt(xy[0]), 6), round(flt(xy[1]), 6)))
+	if len(pts) < 2:
+		frappe.throw("Need the route to look along.")
+	pts = pts[:: max(1, len(pts) // 200)][:200] + ([pts[-1]] if len(pts) > 200 else [])
+	out = []
+	key = None
+	if frappe.db.exists("DocType", "Hipersign Mobile Settings"):
+		key = frappe.get_cached_doc("Hipersign Mobile Settings").get_password("google_maps_api_key", raise_exception=False)
+	if key:
+		try:
+			r = frappe.integrations.utils.make_post_request(
+				"https://places.googleapis.com/v1/places:searchText",
+				json={"textQuery": "petrol pump", "includedType": "gas_station", "pageSize": 20,
+					  "searchAlongRouteParameters": {"polyline": {"encodedPolyline": _encode_polyline(pts)}},
+					  "routingParameters": {"origin": {"latitude": pts[0][0], "longitude": pts[0][1]}}},
+				headers={"X-Goog-Api-Key": key, "Content-Type": "application/json", "X-Goog-FieldMask":
+						 "places.id,places.displayName,places.location,places.shortFormattedAddress,"
+						 "places.currentOpeningHours.openNow,routingSummaries"})
+			places = (r or {}).get("places") or []
+			sums = (r or {}).get("routingSummaries") or []
+			for i, pl in enumerate(places):
+				loc = pl.get("location") or {}
+				leg = ((sums[i].get("legs") or [{}])[0]) if i < len(sums) else {}
+				out.append({
+					"name": (pl.get("displayName") or {}).get("text") or "Petrol pump",
+					"address": pl.get("shortFormattedAddress") or "",
+					"lat": flt(loc.get("latitude")), "lon": flt(loc.get("longitude")),
+					"open": (pl.get("currentOpeningHours") or {}).get("openNow"),
+					"metres": cint(leg.get("distanceMeters")) or None, "seconds": _secs(leg.get("duration")) or None,
+				})
+		except Exception as e:
+			frappe.log_error("HiperTracker: petrol pumps on the way (Google)", str(e))
+	if not out:  # OpenStreetMap: fuel stations within 500 m of the route
+		around = ",".join(f"{la},{lo}" for la, lo in pts[:: max(1, len(pts) // 60)])
+		q = f"[out:json][timeout:20];node(around:500,{around})[amenity=fuel];out 40;"
+		try:
+			r = frappe.integrations.utils.make_post_request("https://overpass-api.de/api/interpreter", data={"data": q})
+			for n in (r or {}).get("elements") or []:
+				t = n.get("tags") or {}
+				out.append({"name": t.get("name") or t.get("brand") or "Petrol pump",
+							"address": t.get("addr:street") or t.get("brand") or "", "lat": flt(n.get("lat")),
+							"lon": flt(n.get("lon")), "open": None, "metres": None, "seconds": None})
+		except Exception as e:
+			frappe.log_error("HiperTracker: petrol pumps on the way (OpenStreetMap)", str(e))
+	return out
+
+
 @frappe.whitelist()
 def route(points, heading=None, two_wheeler=0):
 	"""Road route from the phone through the stops still to visit, in order, with turn-by-turn steps.

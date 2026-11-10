@@ -33,6 +33,7 @@ override_whitelisted_methods = {
 	"hipertracker_attendance_today": "hipertracker.api.attendance_today",
 	"hipertracker_trip_plan": "hipertracker.api.trip_plan",
 	"hipertracker_route": "hipertracker.api.route",
+	"hipertracker_fuel_stations": "hipertracker.api.fuel_stations",
 	"hipertracker_my_log": "hipertracker.api.my_log",
 	"hipertracker_visit_places": "hipertracker.api.visit_places",
 	"hipertracker_best_order": "hipertracker.api.best_order",
