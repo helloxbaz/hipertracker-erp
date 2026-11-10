@@ -416,13 +416,16 @@ def _trip_plans(dev, lat, lon, when, who):
 									   "reference_doctype", "reference_name"],
 							   order_by="idx asc")
 		changed, waiting = False, 0
+		# stops are visited in the planned order: only the next one still to visit can be reached, so
+		# driving past a later stop on the way to an earlier one doesn't tick it off (skip a stop to move on)
+		nxt = next((x.name for x in stops if x.status == "Pending"), None)
 		for st in stops:
 			if st.status != "Skipped":
 				d = _km(lat, lon, flt(st.latitude), flt(st.longitude)) * 1000
 				r = cint(st.radius) or 150
-				if st.status == "Pending" and d <= r:
+				if st.status == "Pending" and st.name == nxt and d <= r:
 					frappe.db.set_value("HiperTracker Trip Stop", st.name, {"status": "Reached", "arrived_at": when,
-										"out_of_order": 1 if waiting else 0}, update_modified=False)
+										"out_of_order": 0}, update_modified=False)
 					st.status, changed = "Reached", True
 					_visit_note(st, f"{who} reached here at {format_datetime(when, 'HH:mm')} (trip plan {pl.name})")
 					if pl.notify_head:
@@ -1094,6 +1097,42 @@ def edit_my_trip(plan, stops, title=None, start_lat=None, start_lon=None):
 			"fuel_litres": pl.fuel_litres, "fuel_cost": pl.fuel_cost}
 
 
+@frappe.whitelist(methods=["POST"])
+def skip_my_stop(plan, idx, undo=0):
+	"""Skip a stop of my trip (stops are reached in order, so skipping moves on to the next one), or undo it."""
+	emp = _my_employee()
+	if not frappe.db.exists("HiperTracker Trip Plan", plan):
+		frappe.throw("Trip not found.")
+	pl = frappe.get_doc("HiperTracker Trip Plan", plan)
+	if pl.employee != emp.name:
+		frappe.throw("This is not your trip.", frappe.PermissionError)
+	st = next((x for x in pl.stops if cint(x.idx) == cint(idx)), None)
+	if not st:
+		frappe.throw("Stop not found.")
+	if cint(undo):
+		if st.status != "Skipped":
+			frappe.throw("This stop is not skipped.")
+		st.status = "Pending"
+	else:
+		if st.status != "Pending":
+			frappe.throw(f"This stop is already {str(st.status).lower()}.")
+		st.status = "Skipped"
+	frappe.db.set_value("HiperTracker Trip Stop", st.name, "status", st.status, update_modified=False)
+	done = len([x for x in pl.stops if x.status != "Pending"])
+	upd = {"progress": f"{done} / {len(pl.stops)}"}
+	now = now_datetime()
+	if done == len(pl.stops):
+		upd.update(status="Completed", finished_at=now)
+	elif pl.status == "Completed":
+		upd.update(status="In Progress", finished_at=None)
+	elif pl.status == "Planned" and done:
+		upd.update(status="In Progress", started_at=now)
+	frappe.db.set_value("HiperTracker Trip Plan", pl.name, upd)
+	if not cint(undo):
+		_visit_note(st, f"{emp.employee_name or emp.name} skipped this stop (trip plan {pl.name})")
+	return {"status": st.status, "progress": upd["progress"]}
+
+
 # ---------------------------------------------------------------------------------------------
 # Leave and expense claims from the app
 # ---------------------------------------------------------------------------------------------
@@ -1491,17 +1530,19 @@ def trip_plan(plan, recalc=0):
 	near = lambda p, st, extra=0: _km(p[0], p[1], flt(st.latitude), flt(st.longitude)) * 1000 <= (cint(st.radius) or 150) + extra  # noqa: E731
 
 	if cint(recalc):
+		after = 0  # in the planned order: each stop is looked for only after the one before it
 		for st in doc.stops:
 			if st.status == "Skipped":
 				continue
 			st.update({"status": "Pending", "arrived_at": None, "left_at": None, "minutes": 0, "out_of_order": 0})
-			i = next((k for k, p in enumerate(pts) if near(p, st)), None)
+			i = next((k for k in range(after, len(pts)) if near(pts[k], st)), None)
 			if i is None:
 				continue
 			j = i
 			while j + 1 < len(pts) and near(pts[j + 1], st, 50):
 				j += 1
 			st.update(status="Reached", arrived_at=pts[i][2])
+			after = j + 1
 			if j + 1 < len(pts):
 				st.update(status="Left", left_at=pts[j + 1][2], minutes=int((pts[j + 1][2] - pts[i][2]).total_seconds() // 60))
 		for st in doc.stops:
@@ -1582,11 +1623,141 @@ def _step_text(kind, mod, road, leg):
 	return _TURN.get(mod, "Continue") + onto
 
 
+_G_TURN = {
+	"TURN_LEFT": ("turn", "left"), "TURN_RIGHT": ("turn", "right"), "TURN_SLIGHT_LEFT": ("turn", "slight left"),
+	"TURN_SLIGHT_RIGHT": ("turn", "slight right"), "TURN_SHARP_LEFT": ("turn", "sharp left"),
+	"TURN_SHARP_RIGHT": ("turn", "sharp right"), "UTURN_LEFT": ("turn", "uturn"), "UTURN_RIGHT": ("turn", "uturn"),
+	"STRAIGHT": ("continue", "straight"), "NAME_CHANGE": ("new name", "straight"), "DEPART": ("depart", ""),
+	"RAMP_LEFT": ("on ramp", "left"), "RAMP_RIGHT": ("on ramp", "right"), "FORK_LEFT": ("fork", "left"),
+	"FORK_RIGHT": ("fork", "right"), "MERGE": ("merge", ""), "ROUNDABOUT_LEFT": ("roundabout", "left"),
+	"ROUNDABOUT_RIGHT": ("roundabout", "right"), "ROUNDABOUT_CLOCKWISE": ("roundabout", "left"),
+	"ROUNDABOUT_COUNTERCLOCKWISE": ("roundabout", "right"), "FERRY": ("continue", "straight"),
+}
+
+
+def _decode_polyline(enc):
+	"""Google encoded polyline -> [[lat, lon], ...]."""
+	out, i, lat, lon = [], 0, 0, 0
+	while i < len(enc):
+		vals = []
+		for _ in range(2):
+			shift = result = 0
+			while True:
+				b = ord(enc[i]) - 63
+				i += 1
+				result |= (b & 0x1F) << shift
+				shift += 5
+				if b < 0x20:
+					break
+			vals.append(~(result >> 1) if result & 1 else result >> 1)
+		lat += vals[0]
+		lon += vals[1]
+		out.append([round(lat / 1e5, 6), round(lon / 1e5, 6)])
+	return out
+
+
+def _secs(v):
+	return int(flt(str(v or "0").rstrip("s")))
+
+
+def _google_routes(pts, heading=None, two_wheeler=False):
+	"""Routes with live traffic from Google (Routes API, key in Hipersign Mobile Settings): the best one and,
+	going to a single stop, the alternatives. None if there is no key or Google doesn't answer."""
+	if not frappe.db.exists("DocType", "Hipersign Mobile Settings"):
+		return None
+	key = frappe.get_cached_doc("Hipersign Mobile Settings").get_password("google_maps_api_key", raise_exception=False)
+	if not key:
+		return None
+	ll = lambda p: {"location": {"latLng": {"latitude": p[0], "longitude": p[1]}}}  # noqa: E731
+	origin = ll(pts[0])
+	if heading is not None and str(heading) != "":
+		origin["location"]["heading"] = int(flt(heading)) % 360
+	body = {
+		"origin": origin, "destination": ll(pts[-1]), "intermediates": [ll(p) for p in pts[1:-1]],
+		"travelMode": "TWO_WHEELER" if two_wheeler else "DRIVE", "routingPreference": "TRAFFIC_AWARE",
+		"computeAlternativeRoutes": len(pts) == 2, "extraComputations": ["TRAFFIC_ON_POLYLINE"],
+		"languageCode": "en-IN", "units": "METRIC",
+	}
+	mask = ",".join("routes." + f for f in (
+		"duration", "staticDuration", "distanceMeters", "polyline.encodedPolyline", "routeLabels",
+		"legs.distanceMeters", "legs.duration", "legs.endLocation", "legs.steps.distanceMeters",
+		"legs.steps.startLocation", "legs.steps.navigationInstruction", "travelAdvisory.speedReadingIntervals"))
+	try:
+		r = frappe.integrations.utils.make_post_request(
+			"https://routes.googleapis.com/directions/v2:computeRoutes", json=body,
+			headers={"X-Goog-Api-Key": key, "X-Goog-FieldMask": mask, "Content-Type": "application/json"})
+	except Exception as e:
+		frappe.log_error("HiperTracker: Google route", str(e))
+		return None
+	out = []
+	for rt in (r or {}).get("routes") or []:
+		steps = []
+		for li, leg in enumerate(rt.get("legs") or []):
+			for s in leg.get("steps") or []:
+				ni = s.get("navigationInstruction") or {}
+				kind, mod = _G_TURN.get(ni.get("maneuver") or "", ("continue", "straight"))
+				text = (ni.get("instructions") or "").split("\n")[0].strip()
+				loc = (s.get("startLocation") or {}).get("latLng") or {}
+				if kind == "depart" and steps:
+					kind = "continue"
+				steps.append({"lat": flt(loc.get("latitude")), "lon": flt(loc.get("longitude")),
+							  "text": text or _step_text(kind, mod, "", li) or "Continue", "type": kind, "modifier": mod,
+							  "distance": cint(s.get("distanceMeters")), "leg": li})
+			end = (leg.get("endLocation") or {}).get("latLng") or {}
+			steps.append({"lat": flt(end.get("latitude")), "lon": flt(end.get("longitude")),
+						  "text": f"Arrive at stop {li + 1}", "type": "arrive", "modifier": "", "distance": 0, "leg": li})
+		traffic = [[cint(t.get("startPolylinePointIndex")), cint(t.get("endPolylinePointIndex")),
+					2 if t.get("speed") == "TRAFFIC_JAM" else 1]
+				   for t in ((rt.get("travelAdvisory") or {}).get("speedReadingIntervals") or [])
+				   if t.get("speed") in ("SLOW", "TRAFFIC_JAM")]
+		out.append({
+			"distance": cint(rt.get("distanceMeters")), "duration": _secs(rt.get("duration")),
+			"duration_no_traffic": _secs(rt.get("staticDuration")),
+			"line": _decode_polyline((rt.get("polyline") or {}).get("encodedPolyline") or ""),
+			"legs": [{"distance": cint(x.get("distanceMeters")), "duration": _secs(x.get("duration"))} for x in rt.get("legs") or []],
+			"steps": steps, "traffic": traffic, "labels": rt.get("routeLabels") or [], "source": "google",
+		})
+	return out or None
+
+
+def _osrm_routes(pts):
+	base = frappe.db.get_single_value("HiperTracker Settings", "routing_url") or "https://router.project-osrm.org"
+	coords = ";".join(f"{lon},{lat}" for lat, lon in pts[:25])
+	r = frappe.integrations.utils.make_get_request(
+		f"{base.rstrip('/')}/route/v1/driving/{coords}?overview=full&geometries=geojson&steps=true"
+		+ ("&alternatives=true" if len(pts) == 2 else ""))
+	if not r or r.get("code") != "Ok" or not r.get("routes"):
+		frappe.throw("No road route found between these places.")
+	out = []
+	for rt in r["routes"][:3]:
+		steps = []
+		for li, leg in enumerate(rt.get("legs", [])):
+			for s in leg.get("steps", []):
+				m = s.get("maneuver") or {}
+				kind, mod = m.get("type") or "", m.get("modifier") or ""
+				road = (s.get("name") or s.get("ref") or "").strip()
+				road = road if road.strip(" .-") else ""
+				text = _step_text(kind, mod, road, li) or (
+					f"At the roundabout, take exit {m.get('exit') or 1}" + (f" onto {road}" if road else ""))
+				loc = m.get("location") or [0, 0]
+				steps.append({"lat": loc[1], "lon": loc[0], "text": " ".join(text.split()), "type": kind, "modifier": mod,
+							  "distance": round(s.get("distance") or 0), "leg": li})
+		out.append({
+			"distance": round(rt.get("distance") or 0), "duration": round(rt.get("duration") or 0),
+			"duration_no_traffic": round(rt.get("duration") or 0),
+			"line": [[round(c[1], 6), round(c[0], 6)] for c in rt["geometry"]["coordinates"]],
+			"legs": [{"distance": round(x.get("distance") or 0), "duration": round(x.get("duration") or 0)} for x in rt.get("legs", [])],
+			"steps": steps, "traffic": [], "labels": [], "source": "osrm",
+		})
+	return out
+
+
 @frappe.whitelist()
-def route(points):
+def route(points, heading=None, two_wheeler=0):
 	"""Road route from the phone through the stops still to visit, in order, with turn-by-turn steps.
-	points = "lat,lon;lat,lon;..." (first = the phone, at most 25). Uses the OSRM server in HiperTracker
-	Settings (Routing Server), by default the free public one."""
+	points = "lat,lon;lat,lon;..." (first = the phone, at most 25). With a Google key in Hipersign Mobile
+	Settings: Google's route with live traffic (time in today's traffic, slow / jammed parts) and, to a single
+	stop, the other ways with their times. Otherwise the OSRM server in HiperTracker Settings (Routing Server)."""
 	pts = []
 	for part in str(points or "").split(";"):
 		xy = part.split(",")
@@ -1596,28 +1767,10 @@ def route(points):
 				pts.append((round(lat, 6), round(lon, 6)))
 	if len(pts) < 2:
 		frappe.throw("Need where you are and at least one stop.")
-	base = frappe.db.get_single_value("HiperTracker Settings", "routing_url") or "https://router.project-osrm.org"
-	coords = ";".join(f"{lon},{lat}" for lat, lon in pts[:25])
-	r = frappe.integrations.utils.make_get_request(
-		f"{base.rstrip('/')}/route/v1/driving/{coords}?overview=full&geometries=geojson&steps=true")
-	if not r or r.get("code") != "Ok" or not r.get("routes"):
-		frappe.throw("No road route found between these places.")
-	rt = r["routes"][0]
-	steps = []
-	for li, leg in enumerate(rt.get("legs", [])):
-		for s in leg.get("steps", []):
-			m = s.get("maneuver") or {}
-			kind, mod = m.get("type") or "", m.get("modifier") or ""
-			road = (s.get("name") or s.get("ref") or "").strip()
-			road = road if road.strip(" .-") else ""
-			text = _step_text(kind, mod, road, li) or (
-				f"At the roundabout, take exit {m.get('exit') or 1}" + (f" onto {road}" if road else ""))
-			loc = m.get("location") or [0, 0]
-			steps.append({"lat": loc[1], "lon": loc[0], "text": " ".join(text.split()), "type": kind, "modifier": mod,
-						  "distance": round(s.get("distance") or 0), "leg": li})
-	return {
-		"distance": round(rt.get("distance") or 0), "duration": round(rt.get("duration") or 0),
-		"line": [[round(c[1], 6), round(c[0], 6)] for c in rt["geometry"]["coordinates"]],
-		"legs": [{"distance": round(x.get("distance") or 0), "duration": round(x.get("duration") or 0)} for x in rt.get("legs", [])],
-		"steps": steps,
-	}
+	if not cint(two_wheeler):  # my vehicle is a bike / scooter: Google's two-wheeler roads and times
+		emp = frappe.db.get_value("Employee", {"user_id": frappe.session.user, "status": "Active"}, "name", as_dict=True)
+		veh = _my_vehicle(emp) if emp else None
+		two_wheeler = 1 if veh and cint(frappe.db.get_value("Vehicle", veh, "wheels")) == 2 else 0
+	routes = _google_routes(pts[:25], heading, cint(two_wheeler)) or _osrm_routes(pts)
+	# the best route at the top (as before) and every route, best first, under "routes"
+	return dict(routes[0], routes=routes)
