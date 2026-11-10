@@ -614,10 +614,16 @@ def _my_device(emp, create=False):
 	)
 
 
+STALE_LOG_HOURS = 20
+
+
 def _last_log(emp):
+	"""The employee's latest check in / out, if it is from the last 20 hours. An older one (for example an
+	IN from a biometric machine weeks ago with no OUT) must not make the phone think they are still on
+	duty, or block today's check in as "already checked in"."""
 	last = frappe.get_all(
 		"Employee Checkin",
-		filters={"employee": emp.name},
+		filters={"employee": emp.name, "time": (">=", add_to_date(now_datetime(), hours=-STALE_LOG_HOURS))},
 		fields=["name", "log_type", "time"],
 		order_by="time desc",
 		limit=1,
