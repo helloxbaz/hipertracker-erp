@@ -23,6 +23,8 @@
   "phone_column",
   "phone_interval",
   "phone_distance",
+  "battery_mode",
+  "low_battery_saver",
   "auto_create_in_traccar",
   "map_section",
   "map_center_lat",
@@ -83,7 +85,7 @@
    "fieldtype": "Password",
    "label": "Traccar API Token",
    "depends_on": "eval:doc.auth_method=='API Token'",
-   "description": "In Traccar: Settings → Account (your user) → Token → generate and copy here. Use an admin user so every device is visible.",
+   "description": "In Traccar: Settings \u2192 Account (your user) \u2192 Token \u2192 generate and copy here. Use an admin user so every device is visible.",
    "hidden": 1
   },
   {
@@ -361,6 +363,21 @@
    "label": "Routing Server (OSRM)",
    "options": "URL",
    "description": "Road routes for the app's trip screen. Empty = the free public OSRM server (fine for a small team; for heavy use run your own OSRM and put its address here)."
+  },
+  {
+   "fieldname": "battery_mode",
+   "fieldtype": "Select",
+   "label": "Tracking Mode",
+   "options": "Balanced (saves battery)\nPrecise (GPS)",
+   "default": "Balanced (saves battery)",
+   "description": "Balanced: the phone uses Wi-Fi and mobile towers and turns GPS on only when needed (about 20-100 m), and reports at least every 2 min / 100 m. Precise: GPS all the time (about 5 m, more battery). Check In / Check Out always uses an accurate GPS location."
+  },
+  {
+   "fieldname": "low_battery_saver",
+   "fieldtype": "Check",
+   "label": "Save Battery When Low",
+   "default": "1",
+   "description": "Below 20% (and not charging) the phone switches to towers / Wi-Fi only and reports every 5 min, so it lasts until check-out. Back to normal when charged."
   }
  ],
  "index_web_pages_for_search": 0,

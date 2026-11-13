@@ -662,8 +662,13 @@ def mobile_config():
 		"device_key": key,
 		# the phone sends its locations straight to this ERP, with its device key
 		"report_url": get_url("/api/method/hipertracker_position") + "?key=" + key,
-		"interval": cint(s.phone_interval) or 60,
-		"distance": cint(s.phone_distance) or 50,
+		# Balanced: Wi-Fi / mobile towers, GPS only when needed (saves battery); Precise: GPS all the time
+		"accuracy": "high" if (s.get("battery_mode") or "").startswith("Precise") else "medium",
+		"interval": (cint(s.phone_interval) or 60) if (s.get("battery_mode") or "").startswith("Precise")
+			else max(cint(s.phone_interval) or 60, 120),
+		"distance": (cint(s.phone_distance) or 50) if (s.get("battery_mode") or "").startswith("Precise")
+			else max(cint(s.phone_distance) or 50, 100),
+		"low_battery_saver": cint(s.low_battery_saver) if s.get("low_battery_saver") is not None else 1,
 		"duty_mode": cint(s.duty_mode) if s.duty_mode is not None else 1,
 		"require_location": cint(s.require_location_checkin) if s.require_location_checkin is not None else 1,
 		"alarm_interval": max(cint(s.alarm_interval) or 30, 10),
