@@ -332,6 +332,11 @@ def position(**a):
 	# over the speed limit (the device's own limit, else the one in Settings); rough fixes don't count
 	limit = cint(dev.speed_limit) or cint(s.speed_limit)
 	acc = _num(a.get("accuracy"))
+	# a fix rougher than the allowed error (Settings: Max Location Error, default 50 m) isn't used as a place:
+	# battery / GPS state still update, but the map, history, visits and trips keep the last good place
+	max_err = cint(s.get("max_location_error")) or 50
+	if acc is not None and acc > max_err:
+		lat = lon = None
 	over = 1 if (limit > 0 and speed and speed > limit and (acc is None or acc <= 50)) else 0
 	event = "Location"
 	if alarm == "gpsAntennaCut":
@@ -387,7 +392,7 @@ def position(**a):
 		for u in _head_users(dev):
 			_bell(u, dev.name, f"GPS back on: {who}")
 		frappe.db.set_value("HiperTracker Device", dev.name, "last_alert_type", "", update_modified=False)
-	if newest and lat is not None and (acc is None or acc <= 100):
+	if newest and lat is not None:
 		_geofences(dev, lat, lon, when, who)
 		_trip_plans(dev, lat, lon, when, who)
 	return {"ok": 1, "msg": None}
@@ -669,6 +674,7 @@ def mobile_config():
 		"distance": (cint(s.phone_distance) or 50) if (s.get("battery_mode") or "").startswith("Precise")
 			else max(cint(s.phone_distance) or 50, 100),
 		"low_battery_saver": cint(s.low_battery_saver) if s.get("low_battery_saver") is not None else 1,
+		"max_location_error": cint(s.get("max_location_error")) or 50,
 		"duty_mode": cint(s.duty_mode) if s.duty_mode is not None else 1,
 		"require_location": cint(s.require_location_checkin) if s.require_location_checkin is not None else 1,
 		"alarm_interval": max(cint(s.alarm_interval) or 30, 10),
@@ -692,6 +698,10 @@ def checkin(log_type, latitude=None, longitude=None, accuracy=None):
 		frappe.throw(
 			f"Your location is needed to check {'in' if log_type == 'IN' else 'out'}. Turn on GPS and try again."
 		)
+	max_err = cint(s.get("max_location_error")) or 50
+	if need_location and has_location and accuracy not in (None, "", "null") and flt(accuracy) > max_err:
+		frappe.throw(f"Your location is only accurate to {cint(flt(accuracy))} m (needs {max_err} m or better). "
+					 "Go outside or near a window and try again.")
 	dev = _my_device(emp)
 	last = _last_log(emp)
 	if last and last.log_type == log_type:

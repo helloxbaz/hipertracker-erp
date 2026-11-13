@@ -25,6 +25,7 @@
   "phone_distance",
   "battery_mode",
   "low_battery_saver",
+  "max_location_error",
   "auto_create_in_traccar",
   "map_section",
   "map_center_lat",
@@ -370,14 +371,21 @@
    "label": "Tracking Mode",
    "options": "Balanced (saves battery)\nPrecise (GPS)",
    "default": "Balanced (saves battery)",
-   "description": "Balanced: the phone uses Wi-Fi and mobile towers and turns GPS on only when needed (about 20-100 m), and reports at least every 2 min / 100 m. Precise: GPS all the time (about 5 m, more battery). Check In / Check Out always uses an accurate GPS location."
+   "description": "Balanced: the phone uses Wi-Fi and GPS when needed instead of GPS all the time, and reports at least every 2 min / 100 m. Precise: GPS all the time (more battery). Either way, locations rougher than Max Location Error are ignored, and Check In / Check Out always uses GPS."
   },
   {
    "fieldname": "low_battery_saver",
    "fieldtype": "Check",
    "label": "Save Battery When Low",
    "default": "1",
-   "description": "Below 20% (and not charging) the phone switches to towers / Wi-Fi only and reports every 5 min, so it lasts until check-out. Back to normal when charged."
+   "description": "Below 20% (and not charging) the phone reports every 5 min / 200 m in balanced mode, so it lasts until check-out. Back to normal when charged."
+  },
+  {
+   "fieldname": "max_location_error",
+   "fieldtype": "Int",
+   "label": "Max Location Error (metres)",
+   "default": "50",
+   "description": "Locations rougher than this are not used (map, history, visits, trips); the last good place is kept. Check In / Check Out also needs a fix within this."
   }
  ],
  "index_web_pages_for_search": 0,
