@@ -1072,10 +1072,22 @@ def my_trip(plan):
 		t1 = pl.finished_at or get_datetime(f"{pl.date} 23:59:59")
 		rows = frappe.get_all("HiperTracker Position", filters=[["device", "=", pl.device], ["device_time", ">=", t0],
 																["device_time", "<=", t1], ["event", "=", "Location"]],
-							  fields=["latitude", "longitude", "accuracy"], order_by="device_time asc", limit_page_length=20000)
-		pts = [[round(flt(r.latitude), 5), round(flt(r.longitude), 5)] for r in rows
-			   if r.latitude is not None and r.longitude is not None and not (r.accuracy and flt(r.accuracy) > 200)]
-		track = pts[:: max(1, len(pts) // 1200)]
+							  fields=["latitude", "longitude", "accuracy", "device_time"], order_by="device_time asc", limit_page_length=20000)
+		rows = [r for r in rows
+				if r.latitude is not None and r.longitude is not None and not (r.accuracy and flt(r.accuracy) > 200)]
+		step = max(1, len(rows) // 1200)
+		prev = None
+		for k, r in enumerate(rows):
+			# keep every gap's ends (the phone sent nothing for >10 min and moved >1 km): [lat, lon, 1] marks one
+			gap = 0
+			if prev is not None and (get_datetime(r.device_time) - get_datetime(prev.device_time)).total_seconds() > 600 \
+					and _km(flt(prev.latitude), flt(prev.longitude), flt(r.latitude), flt(r.longitude)) > 1:
+				gap = 1
+				if track and track[-1][:2] != [round(flt(prev.latitude), 5), round(flt(prev.longitude), 5)]:
+					track.append([round(flt(prev.latitude), 5), round(flt(prev.longitude), 5)])
+			if gap or k % step == 0 or k == len(rows) - 1:
+				track.append([round(flt(r.latitude), 5), round(flt(r.longitude), 5)] + ([1] if gap else []))
+			prev = r
 	start = [pl.start_latitude, pl.start_longitude] if flt(pl.start_latitude) and flt(pl.start_longitude) else None
 	return {**_plan_json(pl), "fuel_price": pl.fuel_price, "start": start, "notes": pl.notes,
 			"stops": [_stop_json(st) for st in pl.stops], "track": track}
@@ -1631,9 +1643,23 @@ def trip_plan(plan, recalc=0):
 	if pts:
 		last = {"lat": pts[-1][0], "lon": pts[-1][1], "time": str(pts[-1][2]),
 				"age_minutes": round((now - pts[-1][2]).total_seconds() / 60.0, 1)}
+	# the phone sent nothing for a while (switched off, GPS off, app closed, no network): that stretch isn't a
+	# road taken, so it is shown apart instead of as a straight line (which can cross the sea)
+	gaps = []
+	out = []
+	for k, p in enumerate(pts):
+		gap = 0
+		if k:
+			q = pts[k - 1]
+			mins = (p[2] - q[2]).total_seconds() / 60.0
+			if mins > 10 and _km(q[0], q[1], p[0], p[1]) > 1:
+				gap = 1
+				gaps.append({"from": str(q[2])[11:16], "to": str(p[2])[11:16], "minutes": int(mins),
+							 "km": round(_km(q[0], q[1], p[0], p[1]), 1)})
+		out.append([p[0], p[1], str(p[2])[11:16], gap])
 	return {"plan": doc.name, "status": doc.status, "device": doc.device, "progress": doc.progress,
 			"planned_km": doc.planned_km, "actual_km": doc.actual_km,
-			"points": [[p[0], p[1], str(p[2])[11:16]] for p in pts], "stops": stops, "last": last}
+			"points": out, "gaps": gaps, "stops": stops, "last": last}
 
 
 # ---------------------------------------------------------------------------------------------

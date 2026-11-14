@@ -112,7 +112,7 @@ function htp_draw(frm) {
 		'<div class="text-muted small htp-hint" style="margin:6px 0 10px"></div><div class="htp-tab"></div>');
 	wrap.find(".htp-hint").text(frm.doc.status === "Planned" || frm.is_new()
 		? __("Click a coloured dot (a customer, lead, deal or supplier with a location) to add it as the next stop, or click anywhere to add a point. Stops are visited in the order of the table — drag rows to change it.")
-		: __("Grey dashed line: the plan. Blue line: the route actually taken. Red dot: where the phone is now."));
+		: __("Grey dashed line: the plan. Blue line: the route actually taken (grey dots: no location from the phone). Red dot: where the phone is now."));
 	htp_leaflet().then(() => {
 		const L = window.L;
 		const map = L.map(wrap.find(".htp-map")[0]).setView([10.55, 76.3], 8);
@@ -175,7 +175,23 @@ function htp_load(frm) {
 		if (frm.__htp_route) map.removeLayer(frm.__htp_route);
 		const g = (frm.__htp_route = L.layerGroup().addTo(map));
 		const pts = (d.points || []).map((p) => [p[0], p[1]]);
-		if (pts.length > 1) L.polyline(pts, { color: "#2563eb", weight: 4, opacity: 0.8 }).addTo(g);
+		// the route taken, in pieces: where the phone sent nothing for a while it's a thin grey dotted line
+		// ("no location"), not a road
+		let seg = [];
+		const flush = () => {
+			if (seg.length > 1) L.polyline(seg, { color: "#2563eb", weight: 4, opacity: 0.8 }).addTo(g);
+			seg = [];
+		};
+		(d.points || []).forEach((p, k) => {
+			if (p[3] && k) {
+				flush();
+				const q = d.points[k - 1];
+				L.polyline([[q[0], q[1]], [p[0], p[1]]], { color: "#9ca3af", weight: 2, dashArray: "2 6" })
+					.bindTooltip(__("No location from the phone {0} – {1}", [q[2], p[2]])).addTo(g);
+			}
+			seg.push([p[0], p[1]]);
+		});
+		flush();
 		if (d.last) {
 			L.circleMarker([d.last.lat, d.last.lon], { radius: 8, color: "#fff", weight: 3, fillColor: "#dc2626", fillOpacity: 1 })
 				.bindTooltip(__("Now here ({0})", [String(d.last.time).slice(11, 16)])).addTo(g);
@@ -195,7 +211,11 @@ function htp_load(frm) {
 			? '<span class="text-danger">' + __("This employee has no HiperTracker phone, so the trip can't be followed.") + "</span>"
 			: "<b>" + reached + " / " + total + "</b> " + __("stops reached") + " · " + __("planned ~{0} km", [d.planned_km || 0]) +
 				" · " + __("travelled {0} km", ["<b>" + (d.actual_km || 0) + "</b>"]) +
-				(d.last ? " · " + __("last seen {0}", [d.last.age_minutes < 1 ? __("just now") : Math.round(d.last.age_minutes) + " min ago"]) : ""));
+				(d.last ? " · " + __("last seen {0}", [d.last.age_minutes < 1 ? __("just now") : Math.round(d.last.age_minutes) + " min ago"]) : "") +
+				((d.gaps || []).length
+					? '<div class="text-muted small" style="margin-top:4px">' + __("No location from the phone (switched off, GPS off, app closed or no network)") + ": " +
+						d.gaps.map((x) => x.from + "–" + x.to).join(", ") + "</div>"
+					: ""));
 		const pill = (s) => {
 			const c = { Pending: "gray", Reached: "orange", Left: "green", Skipped: "gray" }[s] || "gray";
 			return '<span class="indicator-pill ' + c + '">' + htp_esc(__(s === "Left" ? "Done" : s)) + "</span>";
