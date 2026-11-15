@@ -71,6 +71,7 @@ def live(sync=0):
 	is_manager = _is_manager()
 	_, settings = _settings()
 	links = frappe.get_list("HiperTracker Device", fields=DEVICE_FIELDS, filters={"active": 1}, limit_page_length=0)
+	max_err = _max_err()
 	now = now_datetime()
 	out, no_data = [], []
 	for l in links:
@@ -103,6 +104,8 @@ def live(sync=0):
 			"lat": flt(l.last_latitude) if has_pos else None, "lon": flt(l.last_longitude) if has_pos else None,
 			"speed": flt(l.last_speed) if status == "online" else 0, "course": l.last_course,
 			"address": l.last_address, "battery": l.last_battery, "accuracy": l.last_accuracy,
+			# rough fix (no GPS): roughly where, and from what, so the manager doesn't take it as exact
+			"approx": _source(l.last_accuracy, max_err),
 			"location_enabled": 0 if gps_off else 1,
 			"gps_off_since": str(l.gps_off_since) if l.gps_off_since else None,
 			"on_duty": 1 if l.on_duty else 0, "duty_since": str(l.duty_since) if l.duty_since else None,
@@ -153,7 +156,7 @@ def _route(device, date=None):
 		if r.event != "Location":
 			events.append({"time": str(r.device_time), "event": r.event, "lat": r.latitude, "lon": r.longitude})
 			continue
-		if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > 200):
+		if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > _max_err()):
 			continue  # very rough fixes make zig-zags
 		lat, lon = round(flt(r.latitude), 6), round(flt(r.longitude), 6)
 		if pts:
@@ -335,8 +338,7 @@ def position(**a):
 	# a fix rougher than the allowed error (Settings: Max Location Error, default 50 m) isn't used as a place:
 	# battery / GPS state still update, but the map, history, visits and trips keep the last good place
 	max_err = cint(s.get("max_location_error")) or 50
-	if acc is not None and acc > max_err:
-		lat = lon = None
+	rough = acc is not None and acc > max_err  # Wi-Fi / mobile tower fix: where roughly, not for visits or routes
 	over = 1 if (limit > 0 and speed and speed > limit and (acc is None or acc <= 50)) else 0
 	event = "Location"
 	if alarm == "gpsAntennaCut":
@@ -392,7 +394,7 @@ def position(**a):
 		for u in _head_users(dev):
 			_bell(u, dev.name, f"GPS back on: {who}")
 		frappe.db.set_value("HiperTracker Device", dev.name, "last_alert_type", "", update_modified=False)
-	if newest and lat is not None:
+	if newest and lat is not None and not rough:
 		_geofences(dev, lat, lon, when, who)
 		_trip_plans(dev, lat, lon, when, who)
 	return {"ok": 1, "msg": None}
@@ -409,6 +411,29 @@ def _visit_note(st, text):
 		}).insert(ignore_permissions=True)
 	except Exception:
 		pass
+
+
+LEAVE_M = 300
+
+
+def _source(acc, max_err=50):
+	"""None for a precise (GPS) fix, else a label like "Mobile tower, about 800 m"."""
+	acc = flt(acc)
+	if not acc or acc <= max_err:
+		return None
+	what = "Wi-Fi" if acc <= 200 else "Mobile tower"
+	return f"{what}, about {int(round(acc, -1 if acc < 1000 else -2))} m"
+
+
+def _max_err():
+	"""Settings > Max Location Error (default 50 m): rougher fixes (Wi-Fi / mobile tower) aren't drawn as route."""
+	return cint(frappe.db.get_single_value("HiperTracker Settings", "max_location_error")) or 50
+
+
+def _leave_radius(st):
+	"""Metres away from a stop that count as having left it: 300 (parking down the road, walking to the
+	building, GPS wobble are still "there"), or 3 x a stop's own bigger radius."""
+	return max(LEAVE_M, _stop_radius(st) * 3)
 
 
 def _stop_radius(st):
@@ -449,7 +474,7 @@ def _trip_plans(dev, lat, lon, when, who):
 							email = frappe.db.get_value("User", u, "email")
 							if email:
 								frappe.sendmail(recipients=[email], subject=subject, message=body)
-				elif st.status == "Reached" and d > r + 50:  # 50 m margin so GPS wobble at the edge isn't a leave
+				elif st.status == "Reached" and d > _leave_radius(st):  # parked a little away is still "there"
 					frappe.db.set_value("HiperTracker Trip Stop", st.name, {
 						"status": "Left", "left_at": when,
 						"minutes": int(max(time_diff_in_seconds(when, st.arrived_at), 0) // 60)}, update_modified=False)
@@ -1074,7 +1099,7 @@ def my_trip(plan):
 																["device_time", "<=", t1], ["event", "=", "Location"]],
 							  fields=["latitude", "longitude", "accuracy", "device_time"], order_by="device_time asc", limit_page_length=20000)
 		rows = [r for r in rows
-				if r.latitude is not None and r.longitude is not None and not (r.accuracy and flt(r.accuracy) > 200)]
+				if r.latitude is not None and r.longitude is not None and not (r.accuracy and flt(r.accuracy) > _max_err())]
 		step = max(1, len(rows) // 1200)
 		prev = None
 		for k, r in enumerate(rows):
@@ -1298,7 +1323,7 @@ def _travelled_km(doc):
 		fields=["device_time", "latitude", "longitude", "accuracy"])
 	km, anchor = 0.0, None
 	for r in rows:
-		if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > 100):
+		if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > _max_err()):
 			continue
 		p = (flt(r.latitude), flt(r.longitude), get_datetime(r.device_time), flt(r.accuracy))
 		if anchor is None:
@@ -1480,7 +1505,7 @@ def delivery_trip(trip):
 			filters=[["device", "=", dev], ["device_time", ">=", start], ["device_time", "<=", end], ["event", "=", "Location"]],
 			fields=["device_time", "latitude", "longitude", "accuracy", "speed"], order_by="device_time asc", limit_page_length=20000,
 		):
-			if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > 200):
+			if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > _max_err()):
 				continue
 			pts.append([round(flt(r.latitude), 6), round(flt(r.longitude), 6), get_datetime(r.device_time), flt(r.speed)])
 	actual_km = sum(_km(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]) for i in range(1, len(pts)))
@@ -1767,7 +1792,7 @@ def trip_plan(plan, recalc=0):
 					 ["device_time", ">=", f"{doc.date} 00:00:00"], ["device_time", "<=", f"{doc.date} 23:59:59"]],
 			fields=["device_time", "latitude", "longitude", "accuracy"],
 		):
-			if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > 100):
+			if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > _max_err()):
 				continue
 			pts.append([round(flt(r.latitude), 6), round(flt(r.longitude), 6), get_datetime(r.device_time)])
 	near = lambda p, st, extra=0: _km(p[0], p[1], flt(st.latitude), flt(st.longitude)) * 1000 <= _stop_radius(st) + extra  # noqa: E731
@@ -1782,7 +1807,7 @@ def trip_plan(plan, recalc=0):
 			if i is None:
 				continue
 			j = i
-			while j + 1 < len(pts) and near(pts[j + 1], st, 50):
+			while j + 1 < len(pts) and _km(pts[j + 1][0], pts[j + 1][1], flt(st.latitude), flt(st.longitude)) * 1000 <= _leave_radius(st):
 				j += 1
 			st.update(status="Reached", arrived_at=pts[i][2])
 			after = j + 1

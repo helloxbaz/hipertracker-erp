@@ -184,6 +184,7 @@
     add('Phone', d.phone ? '<a href="tel:' + esc(d.phone) + '">' + esc(d.phone) + '</a>' : '');
     add('Speed', (d.speed || 0) + ' km/h');
     add('Location', esc(place(d)));
+    if (d.approx) add('Accuracy', '<b style="color:#b26a00">Approximate</b> <span class="ht-muted">(' + esc(d.approx) + ', no GPS)</span>');
     if (d.place) add('At place', '<b>' + esc(d.place.name) + '</b> <span class="ht-muted">since ' + esc(d.place.since) + '</span>');
     add('Last update', esc(d.last_update ? frappe.datetime.str_to_user(d.last_update) : '—') + ' <span class="ht-muted">(' + ago(d.age_minutes) + ')</span>');
     if (d.status === 'gps_off') add('GPS', '<b style="color:' + COLORS.gps_off + '">Switched off on the phone</b>' +
