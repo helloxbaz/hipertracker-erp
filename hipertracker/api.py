@@ -675,6 +675,7 @@ def mobile_config():
 			else max(cint(s.phone_distance) or 50, 100),
 		"low_battery_saver": cint(s.low_battery_saver) if s.get("low_battery_saver") is not None else 1,
 		"max_location_error": cint(s.get("max_location_error")) or 50,
+		"is_manager": 1 if _can_manage() else 0,
 		"duty_mode": cint(s.duty_mode) if s.duty_mode is not None else 1,
 		"require_location": cint(s.require_location_checkin) if s.require_location_checkin is not None else 1,
 		"alarm_interval": max(cint(s.alarm_interval) or 30, 10),
@@ -1068,8 +1069,7 @@ def my_trip(plan):
 		frappe.throw("This is not your trip.", frappe.PermissionError)
 	track = []
 	if pl.device:
-		t0 = pl.started_at or get_datetime(f"{pl.date} 00:00:00")
-		t1 = pl.finished_at or get_datetime(f"{pl.date} 23:59:59")
+		t0, t1 = _trip_window(pl)
 		rows = frappe.get_all("HiperTracker Position", filters=[["device", "=", pl.device], ["device_time", ">=", t0],
 																["device_time", "<=", t1], ["event", "=", "Location"]],
 							  fields=["latitude", "longitude", "accuracy", "device_time"], order_by="device_time asc", limit_page_length=20000)
@@ -1088,6 +1088,10 @@ def my_trip(plan):
 			if gap or k % step == 0 or k == len(rows) - 1:
 				track.append([round(flt(r.latitude), 5), round(flt(r.longitude), 5)] + ([1] if gap else []))
 			prev = r
+	actual = _travelled_km(pl)
+	if abs(flt(pl.actual_km) - actual) >= 0.1:
+		pl.db_set("actual_km", actual, update_modified=False)
+		pl.actual_km = actual
 	start = [pl.start_latitude, pl.start_longitude] if flt(pl.start_latitude) and flt(pl.start_longitude) else None
 	return {**_plan_json(pl), "fuel_price": pl.fuel_price, "start": start, "notes": pl.notes,
 			"stops": [_stop_json(st) for st in pl.stops], "track": track}
@@ -1268,8 +1272,54 @@ def apply_leave(leave_type=None, from_date=None, to_date=None, half_day=0, reaso
 	return {"name": doc.name, "days": doc.total_leave_days}
 
 
+def _trip_window(doc):
+	"""From when the trip began (planned that day: from then, so the drive to the first stop counts; else the
+	start of the day) to when the last stop was reached (or now / the end of the day if not finished)."""
+	day0 = get_datetime(f"{doc.date} 00:00:00")
+	t0 = day0
+	created = get_datetime(doc.creation) if doc.get("creation") else None
+	if created and created.date() == day0.date():
+		t0 = created
+	if doc.started_at and get_datetime(doc.started_at) < t0:
+		t0 = get_datetime(doc.started_at)
+	t1 = get_datetime(doc.finished_at) if doc.finished_at else min(now_datetime(), get_datetime(f"{doc.date} 23:59:59"))
+	return t0, t1
+
+
+def _travelled_km(doc):
+	"""Km actually driven on a trip, from the phone's locations: standing still (GPS wobble) doesn't count,
+	and where the phone sent nothing for a while the straight distance x 1.3 stands in for the road."""
+	if not doc.device:
+		return 0.0
+	t0, t1 = _trip_window(doc)
+	rows = frappe.get_all(
+		"HiperTracker Position", order_by="device_time asc", limit_page_length=50000,
+		filters=[["device", "=", doc.device], ["event", "=", "Location"], ["device_time", ">=", t0], ["device_time", "<=", t1]],
+		fields=["device_time", "latitude", "longitude", "accuracy"])
+	km, anchor = 0.0, None
+	for r in rows:
+		if r.latitude is None or r.longitude is None or (r.accuracy and flt(r.accuracy) > 100):
+			continue
+		p = (flt(r.latitude), flt(r.longitude), get_datetime(r.device_time), flt(r.accuracy))
+		if anchor is None:
+			anchor = p
+			continue
+		d = _km(anchor[0], anchor[1], p[0], p[1])
+		if d * 1000 < max(25, anchor[3], p[3]):  # still within GPS wobble of the last counted place
+			continue
+		gap = (p[2] - anchor[2]).total_seconds() > 600 and d > 1
+		km += d * 1.3 if gap else d
+		anchor = p
+	return round(km, 1)
+
+
 def _trip_fuel(pl):
 	"""Petrol for a trip: km (travelled, else planned) / mileage x petrol price."""
+	if pl.get("name") and pl.get("device"):  # travelled worked out fresh from the phone's locations
+		actual = _travelled_km(pl)
+		if abs(flt(pl.actual_km) - actual) >= 0.1:
+			frappe.db.set_value("HiperTracker Trip Plan", pl.name, "actual_km", actual, update_modified=False)
+			pl.actual_km = actual
 	km = flt(pl.actual_km) if flt(pl.actual_km) > 0 else flt(pl.planned_km)
 	mileage = flt(pl.mileage)
 	price = flt(pl.fuel_price) or flt(frappe.db.get_single_value("HiperTracker Settings", "fuel_price"))
@@ -1563,6 +1613,140 @@ def attendance_today():
 
 
 # ---------------------------------------------------------------------------------------------
+# Managers in the app: team on the map, alerts, approvals, trips
+# ---------------------------------------------------------------------------------------------
+
+APPROVER_ROLES = ("HR Manager", "HR User", "System Manager")
+
+
+def _can_manage():
+	"""Sees the team in the app: HiperTracker / HR / System managers, and reporting heads."""
+	if _is_manager() or set(frappe.get_roles()) & set(APPROVER_ROLES):
+		return True
+	me = frappe.db.get_value("Employee", {"user_id": frappe.session.user}, "name")
+	return bool(me and frappe.db.exists("Employee", {"reports_to": me, "status": "Active"}))
+
+
+@frappe.whitelist()
+def team_alerts(days=3):
+	"""Alerts sent to me (offline, GPS off, speeding, geofence...) and who has a problem right now."""
+	since = add_days(now_datetime(), -max(cint(days), 1))
+	alerts = [{"time": str(n.creation)[:16], "subject": frappe.utils.strip_html(n.subject or ""), "device": n.document_name,
+			   "read": cint(n.read), "name": n.name}
+			  for n in frappe.get_all("Notification Log", filters=[["for_user", "=", frappe.session.user],
+																	["document_type", "=", "HiperTracker Device"],
+																	["creation", ">=", since]],
+									  fields=["name", "creation", "subject", "document_name", "read"], order_by="creation desc",
+									  limit_page_length=200)]
+	now_issues = []
+	if _can_manage():
+		try:
+			for d in live().get("devices", []):
+				if d["status"] in ("offline", "gps_off"):
+					now_issues.append({"device": d["record"], "name": d["employee_name"] or d["label"], "status": d["status"],
+									   "since": d.get("gps_off_since") or d.get("last_update"), "battery": d.get("battery")})
+		except frappe.PermissionError:
+			pass
+	return {"alerts": alerts, "now": now_issues}
+
+
+@frappe.whitelist(methods=["POST"])
+def team_alerts_read():
+	frappe.db.sql("""update `tabNotification Log` set `read` = 1 where for_user = %s and document_type = 'HiperTracker Device'
+					 and `read` = 0""", frappe.session.user)
+	return {"ok": 1}
+
+
+def _approvable(doctype, approver_field):
+	me = frappe.session.user
+	filters = [["docstatus", "=", 0]]
+	if doctype == "Leave Application":
+		filters.append(["status", "=", "Open"])
+	else:
+		filters.append(["approval_status", "=", "Draft"])
+	if not (set(frappe.get_roles()) & set(APPROVER_ROLES)):
+		filters.append([approver_field, "=", me])
+	return filters
+
+
+@frappe.whitelist()
+def team_requests():
+	"""Leave and expense claims waiting for me (all of them for HR / System managers)."""
+	out = []
+	if frappe.db.exists("DocType", "Leave Application"):
+		for l in frappe.get_all("Leave Application", filters=_approvable("Leave Application", "leave_approver"),
+								fields=["name", "employee_name", "leave_type", "from_date", "to_date", "total_leave_days",
+										"half_day", "description", "creation"], order_by="creation desc", limit_page_length=100):
+			out.append({"doctype": "Leave Application", "name": l.name, "who": l.employee_name, "kind": l.leave_type,
+						"from": str(l.from_date), "to": str(l.to_date), "days": flt(l.total_leave_days),
+						"half_day": cint(l.half_day), "note": l.description or "", "created": str(l.creation)[:16]})
+	if frappe.db.exists("DocType", "Expense Claim"):
+		for c in frappe.get_all("Expense Claim", filters=_approvable("Expense Claim", "expense_approver"),
+								fields=["name", "employee_name", "total_claimed_amount", "posting_date", "remark", "creation"],
+								order_by="creation desc", limit_page_length=100):
+			items = frappe.get_all("Expense Claim Detail", filters={"parent": c.name}, order_by="idx asc",
+								   fields=["expense_type", "amount", "description", "ht_trip_plan"])
+			out.append({"doctype": "Expense Claim", "name": c.name, "who": c.employee_name, "kind": "Expense claim",
+						"amount": flt(c.total_claimed_amount), "date": str(c.posting_date), "note": c.remark or "",
+						"items": [{"type": i.expense_type, "amount": flt(i.amount), "description": i.description or "",
+								   "trip": i.ht_trip_plan} for i in items], "created": str(c.creation)[:16]})
+	out.sort(key=lambda r: r["created"], reverse=True)
+	return out
+
+
+@frappe.whitelist(methods=["POST"])
+def team_decide(doctype, name, action, reason=None):
+	"""Approve or reject a leave application / expense claim from the app."""
+	if doctype not in ("Leave Application", "Expense Claim") or action not in ("approve", "reject"):
+		frappe.throw("Not allowed.")
+	doc = frappe.get_doc(doctype, name)
+	field = "leave_approver" if doctype == "Leave Application" else "expense_approver"
+	if not (set(frappe.get_roles()) & set(APPROVER_ROLES)) and doc.get(field) != frappe.session.user:
+		frappe.throw("You are not the approver of this request.", frappe.PermissionError)
+	if doc.docstatus != 0:
+		frappe.throw("This request is already decided.")
+	if reason:
+		doc.add_comment("Comment", f"{'Approved' if action == 'approve' else 'Rejected'} in the app: {reason}")
+	if doctype == "Leave Application":
+		doc.status = "Approved" if action == "approve" else "Rejected"
+		doc.save()
+		doc.submit()
+		return {"status": doc.status}
+	doc.approval_status = "Approved" if action == "approve" else "Rejected"
+	if action == "approve":
+		for e in doc.expenses:
+			if not flt(e.sanctioned_amount):
+				e.sanctioned_amount = e.amount
+	doc.save()
+	try:
+		doc.submit()
+		return {"status": doc.approval_status, "submitted": 1}
+	except Exception as e:
+		# approved but accounts can't post it yet (e.g. no payable account): saved approved, finance submits later
+		frappe.db.rollback()
+		doc = frappe.get_doc(doctype, name)
+		doc.approval_status = "Approved" if action == "approve" else "Rejected"
+		if action == "approve":
+			for x in doc.expenses:
+				if not flt(x.sanctioned_amount):
+					x.sanctioned_amount = x.amount
+		doc.save()
+		return {"status": doc.approval_status, "submitted": 0,
+				"note": "Approved; the accounts team still needs to submit it (" + frappe.utils.strip_html(str(e))[:160] + ")"}
+
+
+@frappe.whitelist()
+def team_trips(date=None):
+	"""Everyone's trip plans for a day (the ones I can see)."""
+	day = getdate(date or today())
+	rows = frappe.get_list("HiperTracker Trip Plan", filters={"date": day, "status": ["!=", "Cancelled"]},
+						   fields=PLAN_FIELDS + ["employee", "employee_name", "device"], order_by="modified desc",
+						   limit_page_length=200)
+	return [{**_plan_json(frappe._dict(r)), "employee": r.employee, "employee_name": r.employee_name, "device": r.device}
+			for r in rows]
+
+
+# ---------------------------------------------------------------------------------------------
 # Trip Plan form: planned stops vs the route taken
 # ---------------------------------------------------------------------------------------------
 
@@ -1615,10 +1799,7 @@ def trip_plan(plan, recalc=0):
 		doc.started_at = min(reached) if reached else None
 		doc.finished_at = max(reached) if doc.status == "Completed" else None
 
-	start = get_datetime(doc.started_at) if doc.started_at else None
-	end = get_datetime(doc.finished_at) if doc.finished_at else None
-	actual = sum(_km(pts[k - 1][0], pts[k - 1][1], pts[k][0], pts[k][1]) for k in range(1, len(pts))
-				 if (not start or pts[k - 1][2] >= start) and (not end or pts[k][2] <= end))
+	actual = _travelled_km(doc)
 	if cint(recalc):
 		doc.actual_km = round(actual, 1)
 		doc.save(ignore_permissions=True)
