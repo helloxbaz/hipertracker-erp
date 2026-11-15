@@ -1338,23 +1338,150 @@ def _travelled_km(doc):
 	return round(km, 1)
 
 
-def _trip_fuel(pl):
-	"""Petrol for a trip: km (travelled, else planned) / mileage x petrol price."""
-	if pl.get("name") and pl.get("device"):  # travelled worked out fresh from the phone's locations
-		actual = _travelled_km(pl)
-		if abs(flt(pl.actual_km) - actual) >= 0.1:
-			frappe.db.set_value("HiperTracker Trip Plan", pl.name, "actual_km", actual, update_modified=False)
-			pl.actual_km = actual
-	km = flt(pl.actual_km) if flt(pl.actual_km) > 0 else flt(pl.planned_km)
-	mileage = flt(pl.mileage)
-	price = flt(pl.fuel_price) or flt(frappe.db.get_single_value("HiperTracker Settings", "fuel_price"))
-	litres = km / mileage if mileage else 0
+def _return_end(doc, t1):
+	"""When the drive back ended: back within 300 m of the trip's start, else check out, else the day's last place."""
+	if not doc.finished_at:
+		return t1
+	start = None
+	if flt(doc.start_latitude) and flt(doc.start_longitude):
+		start = (flt(doc.start_latitude), flt(doc.start_longitude))
+	day_end = get_datetime(f"{doc.date} 23:59:59")
+	rows = frappe.get_all("HiperTracker Position", order_by="device_time asc", limit_page_length=20000,
+						  filters=[["device", "=", doc.device], ["event", "=", "Location"],
+								   ["device_time", ">", doc.finished_at], ["device_time", "<=", day_end]],
+						  fields=["device_time", "latitude", "longitude", "accuracy"])
+	last = None
+	for r in rows:
+		if r.latitude is None or (r.accuracy and flt(r.accuracy) > _max_err()):
+			continue
+		last = get_datetime(r.device_time)
+		if start and _km(start[0], start[1], flt(r.latitude), flt(r.longitude)) * 1000 <= LEAVE_M:
+			return last
+	emp_out = frappe.db.get_value("Employee Checkin", {"employee": doc.employee, "log_type": "OUT",
+													   "time": ["between", [doc.finished_at, day_end]]}, "time",
+								  order_by="time asc") if doc.employee else None
+	return get_datetime(emp_out) if emp_out else (last or t1)
+
+
+def _snap_km(key, seg):
+	"""Km along the roads for a run of GPS points (Google Roads: snapped to the road, gaps filled in)."""
+	km = 0.0
+	prev = None
+	for i in range(0, len(seg) - 1, 99):
+		chunk = seg[i:i + 100]
+		if len(chunk) < 2:
+			break
+		path = "|".join(f"{p[0]:.6f},{p[1]:.6f}" for p in chunk)
+		r = frappe.integrations.utils.make_get_request(
+			f"https://roads.googleapis.com/v1/snapToRoads?interpolate=true&path={path}", headers={"X-Goog-Api-Key": key})
+		for sp in (r or {}).get("snappedPoints") or []:
+			loc = sp.get("location") or {}
+			cur = (flt(loc.get("latitude")), flt(loc.get("longitude")))
+			if prev:
+				km += _km(prev[0], prev[1], cur[0], cur[1])
+			prev = cur
+	return km
+
+
+def _road_between(a, b):
+	"""Road km between two places (Google's route, else OSRM, else straight x 1.3)."""
+	try:
+		rs = _google_routes([a, b]) or _osrm_routes([a, b])
+		if rs:
+			return flt(rs[0]["distance"]) / 1000.0
+	except Exception:
+		pass
+	return _km(a[0], a[1], b[0], b[1]) * 1.3
+
+
+def _road_km(doc, end):
+	"""Road km actually driven on a trip up to [end]: the phone's precise points snapped onto the roads;
+	where the phone sent nothing for a while, the road route between the two ends."""
+	t0, _ = _trip_window(doc)
+	rows = frappe.get_all("HiperTracker Position", order_by="device_time asc", limit_page_length=50000,
+						  filters=[["device", "=", doc.device], ["event", "=", "Location"],
+								   ["device_time", ">=", t0], ["device_time", "<=", end]],
+						  fields=["device_time", "latitude", "longitude", "accuracy"])
+	pts = []
+	for r in rows:
+		if r.latitude is None or (r.accuracy and flt(r.accuracy) > _max_err()):
+			continue
+		p = (flt(r.latitude), flt(r.longitude), get_datetime(r.device_time))
+		if pts and _km(pts[-1][0], pts[-1][1], p[0], p[1]) * 1000 < 30:
+			continue  # standing still / GPS wobble
+		pts.append(p)
+	if len(pts) < 2:
+		return 0.0
+	segs, gaps = [[pts[0]]], []
+	for q, p in zip(pts, pts[1:]):
+		if (p[2] - q[2]).total_seconds() > 600 and _km(q[0], q[1], p[0], p[1]) > 1:
+			gaps.append((q, p))
+			segs.append([])
+		segs[-1].append(p)
+	key = _google_key()
+	km = 0.0
+	for seg in segs:
+		if len(seg) < 2:
+			continue
+		plain = sum(_km(a[0], a[1], b[0], b[1]) for a, b in zip(seg, seg[1:]))
+		snapped = 0.0
+		if key:
+			try:
+				snapped = _snap_km(key, seg)
+			except Exception as e:
+				frappe.log_error("HiperTracker: road distance (Google Roads)", str(e))
+		# snapping can't be shorter than straight lines between the points: if it is, something went wrong
+		km += snapped if snapped >= plain * 0.95 else plain
+	for q, p in gaps:
+		km += _road_between(q[:2], p[:2])
+	return round(km, 1)
+
+
+def _road(pl):
+	"""Road km of a trip, one way (to the last stop) and with the drive back; worked out once the trip is done
+	and kept (worked out again while it's still going on)."""
+	doc = pl if hasattr(pl, "meta") else frappe.get_doc("HiperTracker Trip Plan", pl.name)
+	if not doc.device or not doc.meta.has_field("road_km"):
+		return None
+	t0, t1 = _trip_window(doc)
+	back = _return_end(doc, t1)
+	settled = doc.status == "Completed" and now_datetime() > add_to_date(back, hours=1)
+	if doc.road_checked and settled and get_datetime(doc.road_checked) > add_to_date(back, hours=1):
+		return {"one": flt(doc.road_km), "back": flt(doc.road_km_return)}
+	one = _road_km(doc, t1)
+	both = _road_km(doc, back) if back > t1 else one
+	frappe.db.set_value("HiperTracker Trip Plan", doc.name,
+						{"road_km": one, "road_km_return": both, "road_checked": now_datetime()}, update_modified=False)
+	return {"one": one, "back": both}
+
+
+def _trip_fuel(pl, with_return=False, road=True):
+	"""Petrol for a trip: road km actually driven (to the last stop, or [with_return] back to the start)
+	/ mileage x petrol price. Before the trip is driven: the planned km."""
+	r = None
+	if road and pl.get("name") and pl.get("status") in ("In Progress", "Completed"):
+		try:
+			r = _road(pl)
+		except Exception as e:
+			frappe.log_error("HiperTracker: road km", str(e))
+	elif pl.get("road_checked"):
+		r = {"one": flt(pl.get("road_km")), "back": flt(pl.get("road_km_return"))}
+	one = flt(r["one"]) if r else 0
+	back = flt(r["back"]) if r else 0
+	driven = back if with_return and back else one
+	km = driven if driven > 0 else flt(pl.get("planned_km"))
+	mileage = flt(pl.get("mileage"))
+	price = flt(pl.get("fuel_price")) or flt(frappe.db.get_single_value("HiperTracker Settings", "fuel_price"))
+	per_km = price / mileage if mileage else 0
+	what = ("road km driven incl. the drive back" if with_return and back else "road km driven") if driven > 0 else "km planned"
 	return {
-		"km": round(km, 1), "actual": 1 if flt(pl.actual_km) > 0 else 0, "mileage": mileage, "price": price,
-		"litres": round(litres, 2), "amount": round(litres * price),
-		"description": f"Petrol for {pl.title or pl.name} ({pl.name}): {round(km, 1)} km "
-					   f"{'travelled' if flt(pl.actual_km) > 0 else 'planned'} / {mileage} km per litre = "
-					   f"{round(litres, 2)} L x Rs {price}",
+		"km": round(km, 1), "actual": 1 if driven > 0 else 0, "mileage": mileage, "price": price,
+		"litres": round(km / mileage, 2) if mileage else 0, "amount": round(km * per_km),
+		"km_one_way": round(one, 1), "km_return": round(back, 1),
+		"amount_one_way": round(one * per_km), "amount_return": round(back * per_km),
+		"with_return": 1 if with_return and back else 0,
+		"description": f"Petrol for {pl.get('title') or pl.get('name')} ({pl.get('name')}): {round(km, 1)} {what} "
+					   f"/ {mileage} km per litre = {round(km / mileage, 2) if mileage else 0} L x Rs {price}",
 	}
 
 
@@ -1383,12 +1510,15 @@ def my_expenses():
 					   "status": "Cancelled" if c.docstatus == 2 else (c.status if c.docstatus == 1 else "Waiting for approval"),
 					   "items": [{"type": r.expense_type, "date": str(r.expense_date), "amount": r.amount,
 								  "description": r.description, "trip": r.ht_trip_plan} for r in rows]})
-	trips = []
+	trips, worked = [], 0
 	for pl in frappe.get_all("HiperTracker Trip Plan", filters=[["employee", "=", emp.name], ["date", ">=", add_days(today(), -60)],
 																["status", "!=", "Cancelled"]],
-							 fields=["name", "title", "date", "status", "planned_km", "actual_km", "mileage", "fuel_price"],
+							 fields=["name", "title", "date", "status", "planned_km", "actual_km", "mileage", "fuel_price",
+									 "road_km", "road_km_return", "road_checked"],
 							 order_by="date desc", limit=100):
-		f = _trip_fuel(pl)
+		fresh = not pl.road_checked and pl.status == "Completed" and worked < 10 and not _claimed_in(pl.name)
+		worked += 1 if fresh else 0
+		f = _trip_fuel(pl, road=fresh)
 		f.pop("description")
 		trips.append({"name": pl.name, "title": pl.title, "date": str(pl.date), "status": pl.status, **f,
 					  "claimed_in": _claimed_in(pl.name)})
@@ -1429,7 +1559,7 @@ def claim_expense(items=None, remark=None, claim=None, action=None):
 				frappe.throw(f"The petrol for {pl.title or pl.name} is already claimed in {used}.")
 			if not fuel_type:
 				frappe.throw("Ask the office to set 'Expense type for trip petrol' in HiperTracker Settings.")
-			f = _trip_fuel(pl)
+			f = _trip_fuel(pl, with_return=cint(it.get("return")))
 			if not f["amount"]:
 				frappe.throw("Set your vehicle mileage first (More > Vehicle mileage), then open the trip again.")
 			rows.append({"expense_type": fuel_type, "expense_date": pl.date, "amount": f["amount"],
@@ -1463,12 +1593,12 @@ def claim_expense(items=None, remark=None, claim=None, action=None):
 
 
 @frappe.whitelist()
-def trip_fuel(plan):
+def trip_fuel(plan, with_return=0):
 	"""Petrol for a trip, for an Expense Claim line in the ERP."""
 	if not frappe.get_list("HiperTracker Trip Plan", filters={"name": plan}, limit=1):
 		frappe.throw("Trip not found.")
 	pl = frappe.get_doc("HiperTracker Trip Plan", plan)
-	return {"employee": pl.employee, "date": str(pl.date), **_trip_fuel(pl),
+	return {"employee": pl.employee, "date": str(pl.date), **_trip_fuel(pl, with_return=cint(with_return)),
 			"expense_type": frappe.db.get_single_value("HiperTracker Settings", "fuel_expense_type"),
 			"claimed_in": _claimed_in(plan)}
 

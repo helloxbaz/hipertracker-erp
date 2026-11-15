@@ -23,6 +23,9 @@
   "planned_km",
   "planned_minutes",
   "actual_km",
+  "road_km",
+  "road_km_return",
+  "road_checked",
   "notes",
   "fuel_section",
   "vehicle",
@@ -233,6 +236,32 @@
    "fieldname": "start_longitude",
    "fieldtype": "Float",
    "label": "Start longitude"
+  },
+  {
+   "fieldname": "road_km",
+   "fieldtype": "Float",
+   "label": "Road km Driven",
+   "precision": "1",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "The phone's track snapped onto the roads (Google), from the start of the trip to the last stop. Petrol claims pay this."
+  },
+  {
+   "fieldname": "road_km_return",
+   "fieldtype": "Float",
+   "label": "Road km incl. Drive Back",
+   "precision": "1",
+   "read_only": 1,
+   "no_copy": 1,
+   "description": "Same, up to getting back to the start (or check out)."
+  },
+  {
+   "fieldname": "road_checked",
+   "fieldtype": "Datetime",
+   "label": "Road km Worked Out",
+   "read_only": 1,
+   "no_copy": 1,
+   "hidden": 1
   }
  ],
  "index_web_pages_for_search": 0,
